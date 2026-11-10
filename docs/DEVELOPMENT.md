@@ -63,9 +63,7 @@ import { parseSii } from 'sii-parser'
 
 部署由 `.github/workflows/deploy.yml` 处理：推送到 `main` 时自动运行，也可以在 Actions 页面手动触发（`workflow_dispatch`）。流程是 `npm ci`、`npm test`、`npm run build`（构建前会自动执行 `npm run format`），然后用 GitHub Pages 官方 actions 发布 `dist/`。
 
-这是项目站点，但构建不绑定仓库名：`vite.config.js` 使用相对基址 `base: './'`，`dist/` 里的资源 URL 形如 `./assets/...`，同一份产物放在 `https://kreedb.github.io/test-ai-web/` 这样的项目子路径、域名根目录或任意目录都能运行，换部署位置不用改配置。前提是页面通过带尾斜杠的 URL 访问（如 `/test-ai-web/`），Service Worker 的离线导航回退也依赖这一点，并且导航继续使用 hash 路由；若改成非 hash 的多级路径，相对基址会按当前目录解析。
-
-`build/offline.js` 读取的是 Vite 解析后的 `config.base`，所以命令行 `npx vite build --base=...` 覆盖基址时，`dist/sw.js` 的预缓存路径会跟着变。`test/offline.test.mjs` 同时校验相对基址的产物和插件对解析后基址的跟随。
+这是项目站点，但构建不绑定仓库名：`vite.config.js` 使用相对基址 `base: './'`，`dist/` 里的资源 URL 形如 `./assets/...`，同一份产物放在 `https://kreedb.github.io/test-ai-web/` 这样的项目子路径、域名根目录或任意目录都能运行，换部署位置不用改配置。前提是页面通过带尾斜杠的 URL 访问（如 `/test-ai-web/`），并且导航继续使用 hash 路由；若改成非 hash 的多级路径，相对基址会按当前目录解析。
 
 导航使用 hash 路由（`#/parser`），不需要服务端重写规则。本地预览生产构建：
 
@@ -75,8 +73,6 @@ npm run preview
 ```
 
 然后打开 http://localhost:4173/。
-
-构建会额外生成 `dist/sw.js`：它由 `build/offline.js` 在构建时写入，把本次构建的全部资源与解析器示例预缓存，页面在线加载过一次后即可断网重开。开发服务器不注册 Service Worker（注册代码只在生产构建里执行），离线行为要用 `npm run build` + `npm run preview` 验证。
 
 `.github/workflows/pullfrog.yml` 由 Pullfrog 管理，标注了不要手改；新增 CI 或部署任务时另建 workflow 文件。
 
@@ -114,7 +110,6 @@ src/components/HomeWorkspace.vue # 首页任务输入、附件与工具建议
 src/components/            # 可编辑表格、PDO、DC、十六进制视图、设计预览、机器人骨架、格式支持与有损表
 src/App.vue                # 页面外壳：可折叠侧栏、顶栏、路由出口、页脚
 public/samples/            # 示例 EEPROM 转储、ESI XML、Altium / Specctra / EAGLE / PADS 工程文件
-build/offline.js           # 构建时生成离线用 Service Worker（预缓存全部产物与解析器示例）
 ```
 
 ### 依赖方向
@@ -186,7 +181,6 @@ npm test
 - `test/workspace.test.mjs`：本地任务匹配、歧义处理与一次性的附件交接。
 - `test/workspace-ui.test.mjs`：真实 Vue 组件的建议匹配、导航草稿与无效导入保留编辑回归测试。
 - `test/lib.test.mjs`：`lib/` 包的 README、入口与解耦约束。
-- `test/offline.test.mjs`：离线 Service Worker 生成。
 
 ### 提速约定
 

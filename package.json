@@ -16,8 +16,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test",
-    "format": "prettier --write \"{src,test,build,lib}/**/*.{js,mjs,vue,css}\" \"*.js\"",
-    "format:check": "prettier --check \"{src,test,build,lib}/**/*.{js,mjs,vue,css}\" \"*.js\""
+    "format": "prettier --write \"{src,test,lib}/**/*.{js,mjs,vue,css}\" \"*.js\"",
+    "format:check": "prettier --check \"{src,test,lib}/**/*.{js,mjs,vue,css}\" \"*.js\""
   },
   "dependencies": {
     "@flatten-js/core": "^1.6.15",
