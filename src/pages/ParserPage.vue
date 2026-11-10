@@ -12,7 +12,7 @@ export const route = {
 </script>
 
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 
 import CategoryTable from '@/components/CategoryTable.vue'
 import DcTable from '@/components/DcTable.vue'
@@ -23,7 +23,8 @@ import SyncManagerTable from '@/components/SyncManagerTable.vue'
 import { downloadBlob, fileBaseName } from '@/lib/download'
 import * as editor from '@/lib/editor'
 import { generateEsiXml, verifyEsiXml } from '@/lib/esi'
-import { formatBytes, hex, normalizedDec, normalizedHex, parseDecValue } from '@/lib/format'
+import { formatBytes, hex, parseDecValue, parseHexValue } from '@/lib/format'
+import { takeQueuedFiles } from '@/lib/workspace'
 import { COE_DETAIL_BITS, DATA_TYPE_NAMES, FMMU_USAGE, GENERAL_FLAG_BITS, MAILBOX_PROTOCOLS, MAX_INPUT_BYTES, PORT_TYPES, parseSii, setBits } from 'sii-parser'
 
 const SAMPLES = [
@@ -53,6 +54,12 @@ const model = reactive(editor.createEmptyModel())
 
 const info = computed(() => model.info)
 const general = computed(() => model.general)
+const workflowStatus = computed(() => {
+  if (busy.value) return '正在读取并解析 EEPROM…'
+  if (error.value) return '文件未能打开，请检查下方提示后重新选择。'
+  if (source.value) return `已解析 ${fileName.value}，可以编辑字段并导出 ESI XML。`
+  return '选择一份转储，或从示例开始。文件只在浏览器本地处理。'
+})
 
 const pageWarnings = computed(() => {
   const list = []
@@ -298,12 +305,7 @@ function applyParsed(parsed, name, sample) {
 }
 
 function fail(cause) {
-  source.value = null
-  output.value = null
-  check.value = null
-  fileName.value = ''
-  sampleName.value = ''
-  exportError.value = ''
+  // Keep unsaved edits until replacement input parses successfully.
   error.value = messageOf(cause)
 }
 
@@ -330,15 +332,25 @@ async function handleFile(file) {
 
 function onDrop(event) {
   dragging.value = false
-  const file = event.dataTransfer?.files?.[0]
-  if (file) handleFile(file)
+  handleFileSelection(event.dataTransfer?.files)
 }
 
 function onFileChange(event) {
-  const file = event.target.files?.[0]
-  if (file) handleFile(file)
+  handleFileSelection(event.target.files)
   event.target.value = ''
 }
+
+function handleFileSelection(input) {
+  if (busy.value) return
+  const files = Array.from(input || [])
+  if (files.length > 1) {
+    fail(new Error('EEPROM 解析器每次只能打开一个 .bin 文件，请重新选择单个文件。'))
+    return
+  }
+  if (files.length) handleFile(files[0])
+}
+
+onMounted(() => handleFileSelection(takeQueuedFiles('parser')))
 
 async function loadSample(sample) {
   if (busy.value) return
@@ -359,6 +371,7 @@ async function loadSample(sample) {
 }
 
 function clearAll() {
+  if (busy.value) return
   source.value = null
   Object.assign(model, editor.createEmptyModel())
   fileName.value = ''
@@ -375,23 +388,26 @@ function baseName() {
 }
 
 function downloadOriginal() {
-  if (!source.value) return
+  if (busy.value || !source.value) return
   downloadBlob(source.value.bytes, `${baseName()}.bin`, 'application/octet-stream')
 }
 
 function downloadXml() {
+  if (busy.value) return
   flushRegenerate()
   if (!output.value) return
   downloadBlob(output.value.xml, `${baseName()}.xml`, 'application/xml')
 }
 
 function downloadCompiled() {
+  if (busy.value) return
   flushRegenerate()
   if (!check.value?.bytes) return
   downloadBlob(check.value.bytes, `${baseName()}-recompiled.bin`, 'application/octet-stream')
 }
 
 async function copyXml() {
+  if (busy.value) return
   flushRegenerate()
   if (!output.value) return
   try {
@@ -408,29 +424,56 @@ async function copyXml() {
 // Section links stay in-page; letting the browser follow them would replace
 // the router hash and send the app back to the navigation page.
 function scrollToSection(id) {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+  document.getElementById(id)?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
 }
 </script>
 
 <template>
-  <main class="app-main">
-    <section class="card input-card">
-      <div class="card-head">
-        <h2>输入 EEPROM 转储</h2>
+  <main class="app-main tool-main">
+    <header class="tool-intro">
+      <p class="tool-eyebrow">convbin / EEPROM</p>
+      <h1>EEPROM 解析器</h1>
+      <p class="tool-description">从一份 SII 转储开始，检查设备配置、编辑字段，再导出 ESI XML。</p>
+    </header>
+
+    <section class="card input-card" :aria-busy="busy" aria-labelledby="parser-input-title">
+      <div class="card-head input-head">
+        <span class="input-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <rect x="6" y="6" width="12" height="12" rx="2" />
+            <path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3M10 10h4v4h-4z" />
+          </svg>
+        </span>
+        <div class="input-title">
+          <h2 id="parser-input-title">输入 EEPROM 转储</h2>
+          <p class="muted small">一次打开一个文件，解析后即可编辑。</p>
+        </div>
         <span v-if="fileName" class="badge">{{ fileName }}</span>
       </div>
 
-      <label class="drop-zone" :class="{ dragging }" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="onDrop">
-        <input type="file" accept=".bin" @change="onFileChange" />
-        <span class="drop-title">拖拽 .bin EEPROM 转储到这里，或点击选择文件</span>
-        <span class="drop-hint">仅支持 .bin · 最大 {{ formatBytes(MAX_INPUT_BYTES) }}</span>
+      <label class="drop-zone" :class="{ dragging: dragging && !busy }" :aria-disabled="busy" @dragover.prevent="dragging = !busy" @dragleave.prevent="dragging = false" @drop.prevent="onDrop">
+        <input type="file" accept=".bin" :disabled="busy" aria-label="选择 EEPROM 转储文件" aria-describedby="parser-drop-hint" @change="onFileChange" />
+        <span class="drop-icon" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="m8 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l8-8" />
+            <path d="m6 14 8-8" />
+          </svg>
+        </span>
+        <span class="drop-title">拖入 .bin 转储，或点击选择文件</span>
+        <span id="parser-drop-hint" class="drop-hint">SII EEPROM · 单个文件 · 最大 {{ formatBytes(MAX_INPUT_BYTES) }}</span>
       </label>
 
-      <div class="actions">
-        <button v-for="sample in SAMPLES" :key="sample.file" type="button" class="btn" :disabled="busy || Boolean(source)" @click="loadSample(sample)">示例：{{ sample.label }}</button>
-        <button type="button" class="btn ghost" :disabled="busy" @click="clearAll">清空</button>
-        <span v-if="sampleName" class="muted small">示例：{{ sampleName }}</span>
+      <div class="actions composer-actions">
+        <div class="sample-actions">
+          <button v-for="sample in SAMPLES" :key="sample.file" type="button" class="btn" :disabled="busy || Boolean(source)" @click="loadSample(sample)">示例：{{ sample.label }}</button>
+        </div>
+        <div class="primary-actions">
+          <button type="button" class="btn ghost" :disabled="busy || (!source && !error)" @click="clearAll">清空</button>
+          <button v-if="source" type="button" class="btn primary" :disabled="busy" @click="scrollToSection('export')">查看与导出 XML</button>
+        </div>
       </div>
+      <p class="workflow-status" role="status" aria-live="polite">{{ workflowStatus }}</p>
     </section>
 
     <div v-if="error" class="card error-card" role="alert">
@@ -914,10 +957,10 @@ function scrollToSection(id) {
         <div class="card-head">
           <h2>导出 ESI XML</h2>
           <div class="actions inline-actions">
-            <button type="button" class="btn small" :disabled="!output" @click="copyXml">
+            <button type="button" class="btn small" :disabled="busy || !output" @click="copyXml">
               {{ copied ? '已复制' : '复制 XML' }}
             </button>
-            <button type="button" class="btn small primary" :disabled="!output" @click="downloadXml">下载 .xml</button>
+            <button type="button" class="btn small primary" :disabled="busy || !output" @click="downloadXml">下载 .xml</button>
           </div>
         </div>
 
@@ -966,14 +1009,14 @@ function scrollToSection(id) {
             </template>
             <p v-else class="muted small">已从生成的 XML 重新编译出 {{ formatBytes(check.actualLength) }} 的镜像。</p>
             <div class="actions">
-              <button type="button" class="btn small" :disabled="!check.bytes" @click="downloadCompiled">下载重新编译的 .bin</button>
+              <button type="button" class="btn small" :disabled="busy || !check.bytes" @click="downloadCompiled">下载重新编译的 .bin</button>
             </div>
           </template>
         </div>
 
         <div class="form-section">
           <h3>EtherCATInfo XML</h3>
-          <textarea class="hex-input xml-input xml-preview" readonly wrap="off" spellcheck="false" :value="output?.xml || ''"></textarea>
+          <textarea class="hex-input xml-input xml-preview" readonly wrap="off" spellcheck="false" aria-label="生成的 ESI XML" :value="output?.xml || ''"></textarea>
         </div>
       </section>
 
@@ -981,16 +1024,21 @@ function scrollToSection(id) {
         <div class="card-head">
           <h2>原始数据</h2>
           <div class="actions inline-actions">
-            <button type="button" class="btn small" @click="downloadOriginal">下载原始 .bin</button>
+            <button type="button" class="btn small" :disabled="busy" @click="downloadOriginal">下载原始 .bin</button>
           </div>
         </div>
         <HexDump :bytes="source.bytes" />
       </section>
     </template>
 
-    <section v-else-if="!error" class="empty-state">
-      <h2>等待输入</h2>
-      <p>上传 .bin 格式的 SII EEPROM 转储后，可在此编辑固定头、General、字符串、FMMU、SyncManager、PDO 与 DC， 并导出 ESI XML。数据类别与列表条目支持新增、修改和删除，固定头字段可直接编辑。</p>
+    <section v-else-if="!error && !busy" class="empty-state">
+      <span class="empty-icon" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8m-8 4h5" />
+        </svg>
+      </span>
+      <h2>先打开一份 EEPROM 转储</h2>
+      <p>将一个 .bin 文件拖到上方，或点击示例试用。解析后可编辑固定头、General、字符串、FMMU、SyncManager、PDO 与 DC，并查看 XML 与重新编译校验。</p>
     </section>
   </main>
 </template>

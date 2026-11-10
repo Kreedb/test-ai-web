@@ -72,7 +72,7 @@ onMounted(center)
 }
 
 .log-current {
-  background: rgba(91, 140, 255, 0.16);
+  background: var(--accent-soft);
 }
 
 .log-time {

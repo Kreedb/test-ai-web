@@ -243,7 +243,7 @@ watch(() => props.current, drawOverlay)
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--bg-soft);
+  background: var(--visual-bg, #141821);
 }
 
 .layer {
