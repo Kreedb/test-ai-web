@@ -16,7 +16,7 @@ import { latin1Bytes, stringByteLength } from './format.js'
 
 export { latin1Bytes, stringByteLength }
 
-const clone = (value) => JSON.parse(JSON.stringify(value))
+const clone = (value) => structuredClone(value)
 
 function emptyMailbox() {
   return { rxOffset: 0, rxSize: 0, txOffset: 0, txSize: 0 }
@@ -223,8 +223,14 @@ export function setName(model, owner, nameKey, indexKey, text) {
     index = 0
   }
 
+  if (!value) {
+    // Clearing an unshared name must not leave an empty entry behind; a shared
+    // entry still belongs to the other fields that point at it.
+    if (index) removeString(model, index)
+    return
+  }
+
   if (!index) {
-    if (!value) return
     index = addString(model)
     owner[indexKey] = index
   }

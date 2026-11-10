@@ -413,6 +413,9 @@ function buildPdoCategory(elements, strings, bitSizes, warnings) {
         const key = typeName.toUpperCase()
         if (bitSizes.has(key)) bitLength = bitSizes.get(key)
       }
+      if (bitLength > 255) {
+        throw new Error(`PDO 条目 0x${(parseNumber(textOf(entryIndex)) & 0xffff).toString(16).toUpperCase()} 的位长 ${bitLength} 超过 255 位上限`)
+      }
       totalBits += bitLength
 
       writer.u16(parseNumber(textOf(entryIndex)) & 0xffff)
@@ -1076,10 +1079,10 @@ export function generateEsiXml(result, options = {}) {
       message: 'General 标志位“Physical Memory 识别”无法在 ESI 中表达。',
     })
   }
-  if ((info.eepromSizeRaw ?? 0) !== Math.floor(byteSize / 128) - 1) {
+  if (result.byteLength > 0 && (info.eepromSizeBytes ?? byteSize) !== result.byteLength) {
     warnings.push({
       level: 'warn',
-      message: 'EEPROM 大小字段与输入长度不一致，导出值按输入长度计算。',
+      message: `EEPROM 大小字段 ${info.eepromSizeBytes ?? byteSize} 字节与输入长度 ${result.byteLength} 字节不一致，导出的 ByteSize 使用字段值。`,
     })
   }
 

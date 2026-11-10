@@ -146,7 +146,7 @@ export function parseUrdf(source, { parseXml } = {}) {
 }
 
 /** Parse a binary or ASCII STL into flat triangle vertices. */
-export function parseStl(bytes, { maxTriangles = Infinity } = {}) {
+export function parseStl(bytes) {
   let triangles
   let total
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -164,10 +164,9 @@ export function parseStl(bytes, { maxTriangles = Infinity } = {}) {
 
   if (binary) {
     total = count
-    const stride = Math.max(1, Math.ceil(total / maxTriangles))
-    triangles = new Float32Array(Math.ceil(total / stride) * 9)
+    triangles = new Float32Array(total * 9)
     let write = 0
-    for (let index = 0; index < total; index += stride) {
+    for (let index = 0; index < total; index += 1) {
       const offset = 84 + index * 50 + 12
       for (let vertex = 0; vertex < 9; vertex += 1) triangles[write++] = view.getFloat32(offset + vertex * 4, true)
     }
@@ -178,12 +177,8 @@ export function parseStl(bytes, { maxTriangles = Infinity } = {}) {
     let match
     while ((match = pattern.exec(text))) vertices.push(Number(match[1]), Number(match[2]), Number(match[3]))
     total = Math.floor(vertices.length / 9)
-    const stride = Math.max(1, Math.ceil(total / maxTriangles))
-    triangles = new Float32Array(Math.ceil(total / stride) * 9)
-    let write = 0
-    for (let index = 0; index < total; index += stride) {
-      for (let vertex = 0; vertex < 9; vertex += 1) triangles[write++] = vertices[index * 9 + vertex]
-    }
+    triangles = new Float32Array(total * 9)
+    for (let index = 0; index < triangles.length; index += 1) triangles[index] = vertices[index]
   }
   return { triangles, total, binary }
 }
@@ -196,6 +191,9 @@ export function parseStl(bytes, { maxTriangles = Infinity } = {}) {
 export function smoothNormals(triangles) {
   const faces = Math.floor(triangles.length / 9)
   const sums = new Map()
+  // Keep each vertex's bucket from the accumulation pass so the second pass
+  // does not format and look up the same coordinate key again.
+  const buckets = new Array(faces * 3)
   const key = (offset) => `${Math.round(triangles[offset] * 1e4)},${Math.round(triangles[offset + 1] * 1e4)},${Math.round(triangles[offset + 2] * 1e4)}`
   for (let face = 0; face < faces; face += 1) {
     const offset = face * 9
@@ -214,12 +212,16 @@ export function smoothNormals(triangles) {
     const nz = e1x * e2y - e1y * e2x
     for (let vertex = 0; vertex < 9; vertex += 3) {
       const id = key(offset + vertex)
-      const sum = sums.get(id)
+      let sum = sums.get(id)
       if (sum) {
         sum[0] += nx
         sum[1] += ny
         sum[2] += nz
-      } else sums.set(id, [nx, ny, nz])
+      } else {
+        sum = [nx, ny, nz]
+        sums.set(id, sum)
+      }
+      buckets[face * 3 + vertex / 3] = sum
     }
   }
 
@@ -227,7 +229,7 @@ export function smoothNormals(triangles) {
   for (let face = 0; face < faces; face += 1) {
     const offset = face * 9
     for (let vertex = 0; vertex < 9; vertex += 3) {
-      const sum = sums.get(key(offset + vertex))
+      const sum = buckets[face * 3 + vertex / 3]
       const length = sum ? Math.hypot(sum[0], sum[1], sum[2]) : 0
       if (length > 0) {
         normals[offset + vertex] = sum[0] / length

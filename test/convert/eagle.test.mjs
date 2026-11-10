@@ -226,6 +226,33 @@ test('mirrored elements keep their layer, pad positions and nets', async () => {
   assert.equal(((Number(padAt[3]) % 360) + 360) % 360, 90, 'pad angle should include the component rotation')
 })
 
+test('out-of-order numeric EAGLE pads keep their own pin numbers', () => {
+  const boardXml = `<?xml version="1.0" encoding="utf-8"?>
+<eagle version="7.3.0"><drawing><board>
+<plain>
+<wire x1="0" y1="0" x2="20" y2="0" width="0" layer="20"/><wire x1="20" y1="0" x2="20" y2="20" width="0" layer="20"/>
+<wire x1="20" y1="20" x2="0" y2="20" width="0" layer="20"/><wire x1="0" y1="20" x2="0" y2="0" width="0" layer="20"/>
+</plain>
+<libraries><library name="lib"><packages><package name="PKG">
+<smd name="2" x="2" y="0" dx="1" dy="0.5" layer="1"/>
+<smd name="1" x="0" y="0" dx="1" dy="0.5" layer="1"/>
+</package></packages></library></libraries>
+<elements><element name="U1" library="lib" package="PKG" value="X" x="5" y="5"/></elements>
+<signals><signal name="VCC"><contactref element="U1" pad="1"/></signal></signals>
+</board></drawing></eagle>`
+
+  const { board } = parseEagleXml(boardXml)
+  const circuitJson = eagleToCircuitJson({ board })
+  const ports = circuitJson.filter((element) => element.type === 'source_port')
+  assert.deepEqual(
+    ports.map((port) => [port.name, port.pin_number]),
+    [
+      ['2', 2],
+      ['1', 1],
+    ],
+  )
+})
+
 test('EAGLE cream="no" keeps an SMD pad out of the solder paste layer', async () => {
   // EAGLE enables cream for SMD pads by default, so a pad without `cream="no"`
   // must still reach the paste layer while the disabled one must not.

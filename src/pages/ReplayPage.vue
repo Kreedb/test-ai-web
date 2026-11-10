@@ -18,7 +18,7 @@ import LogTimeline from '@/components/LogTimeline.vue'
 import RobotSkeletonView from '@/components/RobotSkeletonView.vue'
 import SignalChart from '@/components/SignalChart.vue'
 import { expandArchive, isZipArchive } from '@/lib/archive'
-import { formatBytes } from '@/lib/format'
+import { formatBytes, formatTime, jointColor } from '@/lib/format'
 import { BAG_FORMATS, FORMAT_LABELS, inspectBag, readBag, sniffBagFormat } from '@/lib/replay/bag'
 import { MAX_LOG_BYTES, alignLog, parseLogText } from '@/lib/replay/logfile'
 import { buildJointValues, computePose, normalizeQuat, quatToEuler } from '@/lib/replay/pose'
@@ -242,18 +242,12 @@ const stats = computed(() => {
   ]
 })
 
-function colorOf(name) {
-  if (String(name).startsWith('left') || String(name).endsWith('_L')) return '#5b8cff'
-  if (String(name).startsWith('right') || String(name).endsWith('_R')) return '#f5b942'
-  return '#c4b5fd'
-}
-
 const waveRows = computed(() => {
   const rows = []
   const joint = jointSeries.value
   if (joint) {
     joint.names.forEach((name, column) => {
-      rows.push({ label: name, values: joint.columns[column], times: joint.times, color: colorOf(name) })
+      rows.push({ label: name, values: joint.columns[column], times: joint.times, color: jointColor(name) })
     })
   }
   const imu = imuSeries.value
@@ -279,14 +273,6 @@ const waveRows = computed(() => {
 
 function messageOf(cause) {
   return cause instanceof Error ? cause.message : String(cause)
-}
-
-function formatTime(seconds) {
-  const sign = seconds < 0 ? '-' : ''
-  const value = Math.abs(seconds)
-  const minutes = Math.floor(value / 60)
-  const rest = value - minutes * 60
-  return `${sign}${minutes}:${rest.toFixed(2).padStart(5, '0')}`
 }
 
 function pickTopic(list, preferred) {
@@ -458,8 +444,6 @@ async function applyTopics(files, jointName, imuName) {
         imuTopic.value = ''
       }
     }
-    if (!(end > start)) throw new Error('关节与 IMU 话题没有重叠的有效时间段')
-
     result.value = decoded
     bagFormat.value = decoded.format
     startTime.value = start
@@ -489,10 +473,13 @@ async function loadBagFiles(files, sample = '') {
   error.value = ''
   try {
     if (!files.length) throw new Error('没有 bag 文件')
+    let total = 0
     for (const file of files) {
       if (!file.bytes.length) throw new Error(`${file.name} 是空文件`)
       if (file.bytes.length > MAX_BAG_BYTES) throw new Error(`${file.name} 超过 ${formatBytes(MAX_BAG_BYTES)} 上限`)
+      total += file.bytes.length
     }
+    if (total > MAX_BAG_BYTES) throw new Error(`bag 合计超过 ${formatBytes(MAX_BAG_BYTES)} 上限，请分批回放`)
     const info = inspectBag(files, formatMode.value)
     topics.value = info.topics
     const joints = info.topics.filter((topic) => topic.kind === 'joint')
@@ -559,9 +546,11 @@ async function handleLogs(files) {
   logBusy.value = true
   try {
     await new Promise((resolve) => requestAnimationFrame(resolve))
-    const texts = []
-    for (const file of files) texts.push(await file.text())
-    const parsed = parseLogText(texts.join('\n'))
+    let parsed = { entries: [], warnings: [], current: null, truncated: false }
+    for (const file of files) {
+      parsed = parseLogText(await file.text(), parsed)
+      if (parsed.truncated) break
+    }
     if (!parsed.entries.length) throw new Error('日志里没有带时间戳的行（支持 clk(...)、[epoch] 或 YYYY-MM-DD HH:MM:SS.mmm）')
     logEntries.value = parsed.entries
     logWarnings.value = parsed.warnings

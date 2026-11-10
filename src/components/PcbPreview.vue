@@ -192,7 +192,7 @@ const pinSummary = (item) => {
             :y="(item.element.y ?? 0) - (item.element.rect_pad_height || item.element.height) / 2"
             :width="item.element.rect_pad_width || item.element.width"
             :height="item.element.rect_pad_height || item.element.height"
-            :rx="item.element.corner_radius || 0"
+            :rx="item.element.radius || item.element.corner_radius || 0"
             :transform="`rotate(${item.element.rect_ccw_rotation || item.element.ccw_rotation || 0} ${item.element.x ?? 0} ${item.element.y ?? 0})`"
             fill="#e0b04a"
             stroke="#0b0d12"

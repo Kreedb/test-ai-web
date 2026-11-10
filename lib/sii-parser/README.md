@@ -41,7 +41,7 @@ the input is empty.
 | `categoryName(type)` | Human-readable category name |
 | `setBits(value, bits)` | Toggle a bit mask (used by the editor UI) |
 | `MAX_INPUT_BYTES` | 512 KiB upper bound accepted by the parser |
-| `HEADER_BYTES`, `CATEGORY_START_WORD` | Layout constants |
+| `HEADER_BYTES` | Layout constant |
 | `CATEGORY_TYPE`, `DATA_TYPE_NAMES`, `FMMU_USAGE`, `PDO_FLAG_BITS`, `PDO_SYNC_NAMES`, `SM_ENABLE_BITS`, `GENERAL_FLAG_BITS`, `MAILBOX_PROTOCOLS`, `COE_DETAIL_BITS`, `PORT_TYPES` | Field tables used by the parser and by editors |
 
 ## Format notes

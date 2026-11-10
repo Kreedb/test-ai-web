@@ -492,7 +492,7 @@ function pcbElementBounds(element) {
   }
 }
 
-function pcbItem(index, element, kind, layers) {
+function pcbItem(element, kind, layers) {
   // Circuit JSON ids are unique per element type only, and converters reuse
   // plain tokens (`pad1`) across types; prefix with the kind so selection and
   // the render keys stay distinct.
@@ -531,28 +531,28 @@ function buildPcb(index) {
   }
 
   for (const element of index.list('pcb_board')) {
-    items.push(pcbItem(index, element, 'board', ['edge']))
+    items.push(pcbItem(element, 'board', ['edge']))
   }
   for (const element of index.list('pcb_cutout')) {
-    items.push(pcbItem(index, element, 'cutout', ['edge']))
+    items.push(pcbItem(element, 'cutout', ['edge']))
   }
   for (const element of index.list('pcb_copper_pour')) {
     trackCopper(element)
-    items.push(withNet(pcbItem(index, element, 'pour', copperLayersOf(element)), index.netForSourceNet(element.source_net_id)))
+    items.push(withNet(pcbItem(element, 'pour', copperLayersOf(element)), index.netForSourceNet(element.source_net_id)))
   }
   for (const element of index.list('pcb_trace')) {
     trackCopper(element)
     const net = index.netForSourceNet(element.source_net_id) || index.netForTrace(element.source_trace_id)
-    items.push(withNet(pcbItem(index, element, 'trace', copperLayersOf(element)), net))
+    items.push(withNet(pcbItem(element, 'trace', copperLayersOf(element)), net))
   }
   for (const element of index.list('pcb_via')) {
     const net = index.netForSourceNet(element.source_net_id) || index.netForTrace(element.source_trace_id)
-    items.push(withNet(pcbItem(index, element, 'via', copperLayersOf(element)), net))
+    items.push(withNet(pcbItem(element, 'via', copperLayersOf(element)), net))
   }
   for (const element of index.list('pcb_smtpad')) {
     trackCopper(element)
     const net = element.pcb_port_id ? index.pcbPortNet.get(element.pcb_port_id) : null
-    const item = pcbItem(index, element, 'pad', copperLayersOf(element))
+    const item = pcbItem(element, 'pad', copperLayersOf(element))
     item.componentId = element.pcb_component_id
     item.pin = element.port_hints?.[0] ?? element.pin_number ?? ''
     items.push(withNet(item, net))
@@ -560,16 +560,16 @@ function buildPcb(index) {
   for (const element of index.list('pcb_plated_hole')) {
     trackCopper(element)
     const net = element.pcb_port_id ? index.pcbPortNet.get(element.pcb_port_id) : null
-    const item = pcbItem(index, element, 'pad', copperLayersOf(element))
+    const item = pcbItem(element, 'pad', copperLayersOf(element))
     item.componentId = element.pcb_component_id
     item.pin = element.port_hints?.[0] ?? element.pin_number ?? ''
     items.push(withNet(item, net))
   }
   for (const element of index.list('pcb_hole')) {
-    items.push(pcbItem(index, element, 'hole', ['holes']))
+    items.push(pcbItem(element, 'hole', ['holes']))
   }
   for (const element of index.list('pcb_component')) {
-    const item = pcbItem(index, element, 'component', [element.layer === BOTTOM ? 'silk-bottom' : 'silk-top'])
+    const item = pcbItem(element, 'component', [element.layer === BOTTOM ? 'silk-bottom' : 'silk-top'])
     item.refdes = index.nameOf(element.source_component_id)
     // `componentId` is the join key with pads and the click selection, so it
     // stays the raw Circuit JSON id (the item `id` is kind-prefixed).
@@ -583,19 +583,19 @@ function buildPcb(index) {
     if (item.kind === 'pad') item.refdes = refdesByComponent.get(item.componentId) || ''
   }
   for (const element of index.list('pcb_courtyard_outline')) {
-    items.push(pcbItem(index, element, 'courtyard', sideLayers(element.layer, 'courtyard')))
+    items.push(pcbItem(element, 'courtyard', sideLayers(element.layer, 'courtyard')))
   }
   for (const type of ['pcb_silkscreen_path', 'pcb_silkscreen_line', 'pcb_silkscreen_circle', 'pcb_silkscreen_graphic']) {
     for (const element of index.list(type)) {
-      items.push(pcbItem(index, element, 'graphic', sideLayers(element.layer, 'silk')))
+      items.push(pcbItem(element, 'graphic', sideLayers(element.layer, 'silk')))
     }
   }
   for (const element of index.list('pcb_silkscreen_text')) {
-    items.push(pcbItem(index, element, 'text', sideLayers(element.layer, 'silk')))
+    items.push(pcbItem(element, 'text', sideLayers(element.layer, 'silk')))
   }
   for (const type of ['pcb_fabrication_note_path', 'pcb_fabrication_note_text']) {
     for (const element of index.list(type)) {
-      items.push(pcbItem(index, element, 'fab', sideLayers(element.layer, 'fab')))
+      items.push(pcbItem(element, 'fab', sideLayers(element.layer, 'fab')))
     }
   }
 

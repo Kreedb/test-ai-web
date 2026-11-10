@@ -1,6 +1,8 @@
 <script setup>
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
+import { jointColor } from '@/lib/format'
+
 const props = defineProps({
   points: { type: Array, default: null },
   skeleton: { type: Array, default: null },
@@ -171,7 +173,7 @@ function createProgram(vertexSource, fragmentSource, attributeNames, uniformName
 function initGL() {
   const surface = glCanvas.value
   if (!surface) return
-  gl = surface.getContext('webgl', { antialias: true, alpha: true }) || surface.getContext('experimental-webgl', { antialias: true, alpha: true })
+  gl = surface.getContext('webgl', { antialias: true, alpha: true })
   if (!gl) return
   const meshFragment = `precision highp float;
 uniform vec3 u_color;
@@ -359,7 +361,7 @@ function draw() {
     const to = projected[index]
     if (!from || !to) return
     const name = node.name
-    const color = name.startsWith('left') || name.endsWith('_L') ? '#5b8cff' : name.startsWith('right') || name.endsWith('_R') ? '#f5b942' : '#c4b5fd'
+    const color = jointColor(name)
     bones.push({
       from,
       to,

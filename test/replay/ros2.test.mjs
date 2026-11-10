@@ -98,6 +98,53 @@ test('merges split MCAP files without warning about topics in the other file', (
   assert.match(missing.warnings.find((warning) => /没有可用消息/.test(warning.message)).message, /\/odom/)
 })
 
+test('merges split joints by name even when the publisher reorders them', () => {
+  const channels = [{ id: 0, topic: '/joint/state', type: 'sensor_msgs/msg/JointState', definition: JOINT_DEFINITION }]
+  const first = buildMcap({
+    channels,
+    messages: [{ channel: 0, logTime: 1_700_000_000_000_000_000n, data: encodeCdrJointState({ names: ['b', 'a'], position: [2, 1] }) }],
+  })
+  const second = buildMcap({
+    channels,
+    messages: [{ channel: 0, logTime: 1_700_000_001_000_000_000n, data: encodeCdrJointState({ names: ['a', 'b'], position: [3, 4] }) }],
+  })
+
+  const decoded = readBag(
+    [
+      { name: '1.mcap', bytes: first },
+      { name: '2.mcap', bytes: second },
+    ],
+    { topics: ['/joint/state'] },
+  )
+  const series = decoded.series['/joint/state']
+  assert.deepEqual(series.names, ['b', 'a'])
+  assert.deepEqual([...series.columns[0]], [2, 4])
+  assert.deepEqual([...series.columns[1]], [1, 3])
+})
+
+test('rejects a split topic whose message type changes', () => {
+  const first = buildMcap({
+    channels: [{ id: 0, topic: '/joint/state', type: 'sensor_msgs/msg/JointState', definition: JOINT_DEFINITION }],
+    messages: [{ channel: 0, logTime: 1_700_000_000_000_000_000n, data: encodeCdrJointState({ names: ['a'], position: [1] }) }],
+  })
+  const second = buildMcap({
+    channels: [{ id: 0, topic: '/joint/state', type: 'controller_msgs/JointState', definition: JOINT_DEFINITION }],
+    messages: [{ channel: 0, logTime: 1_700_000_001_000_000_000n, data: encodeCdrJointState({ names: ['a'], position: [2] }) }],
+  })
+
+  assert.throws(
+    () =>
+      readBag(
+        [
+          { name: '1.mcap', bytes: first },
+          { name: '2.mcap', bytes: second },
+        ],
+        { topics: ['/joint/state'] },
+      ),
+    /类型不一致/,
+  )
+})
+
 test('manual format selection rejects a mismatched file', () => {
   assert.throws(() => inspectBag([{ name: 'demo.mcap', bytes: mcapBytes('none') }], 'sqlite'), /不一致/)
   assert.throws(() => readBag([{ name: 'demo.db3', bytes: sqliteBytes }], { format: 'ros1', topics: [] }), /不一致/)
@@ -175,7 +222,7 @@ test('parses URDF joints, fixed links and mesh references', () => {
   assert.ok(Math.abs(arm.rpy[1] - 1.5707963) < 1e-6)
 })
 
-test('parses binary STL triangles and decimates to a budget', () => {
+test('parses binary STL triangles', () => {
   const count = 10
   const bytes = new Uint8Array(84 + count * 50)
   new DataView(bytes.buffer).setUint32(80, count, true)
@@ -187,8 +234,6 @@ test('parses binary STL triangles and decimates to a budget', () => {
   const parsed = parseStl(bytes)
   assert.equal(parsed.total, 10)
   assert.equal(parsed.triangles.length, 90)
-  const decimated = parseStl(bytes, { maxTriangles: 2 })
-  assert.equal(decimated.triangles.length, 18)
 })
 
 test('welds shared STL vertices for smooth normals', () => {
