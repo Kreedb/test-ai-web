@@ -5,14 +5,19 @@ import { join } from 'node:path'
 // The whole app is static, so a build-time precache list makes every tool work
 // offline after the first visit. `staticFiles` covers public/ assets the bundle
 // does not list; runtime fetches are cached as used.
-export function offlinePlugin(base, staticFiles = []) {
+export function offlinePlugin(staticFiles = []) {
   let publicDir = 'public'
+  let base = '/'
 
   return {
     name: 'convbin-offline',
     apply: 'build',
     configResolved(config) {
       publicDir = config.publicDir
+      // Read the resolved base here, not from a caller-supplied constant: a
+      // `--base` override would otherwise leave precache URLs pointing at the
+      // wrong path.
+      base = config.base
     },
     generateBundle: {
       // Vite writes index.html in its own generateBundle, so run after it to
