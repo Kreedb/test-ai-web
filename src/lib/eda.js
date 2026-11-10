@@ -19,8 +19,8 @@ const MB = 1024 * 1024
 
 export const MAX_INPUT_BYTES = 40 * MB
 
-// Parsing expands documents many times over (a 1.7 MB PcbDoc becomes 60 MB of
-// Circuit JSON), so cap the whole upload as well as each file.
+// Conversion builds the whole Circuit JSON in memory before writing files, so
+// cap the batch as well as each input.
 export const MAX_TOTAL_BYTES = 120 * MB
 
 function unsupportedMessage(source, format) {

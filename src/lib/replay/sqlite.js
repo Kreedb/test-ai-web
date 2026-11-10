@@ -30,10 +30,11 @@ function varint(bytes, offset) {
   for (let index = 0; index < 9; index += 1) {
     const byte = bytes[offset + index]
     if (byte === undefined) throw new Error('SQLite 变长整数越界，文件可能被截断')
+    // The 9th byte contributes all 8 bits; the first eight contribute 7 each.
+    if (index === 8) return { value: value * 256 + byte, offset: offset + 9 }
     value = value * 128 + (byte & 0x7f)
     if (!(byte & 0x80)) return { value, offset: offset + index + 1 }
   }
-  return { value, offset: offset + 9 }
 }
 
 const SERIAL_SIZE = [0, 1, 2, 3, 4, 6, 8]

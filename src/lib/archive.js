@@ -115,6 +115,7 @@ export async function expandArchive(name, bytes, { maxFileBytes = Infinity, maxT
   const skipped = []
   const selected = []
   let total = 0
+  let tooMany = 0
 
   for (const entry of entries) {
     const path = pathOf(entry.name)
@@ -139,13 +140,17 @@ export async function expandArchive(name, bytes, { maxFileBytes = Infinity, maxT
       continue
     }
     if (selected.length >= maxEntries) {
-      skipped.push({ name: path, reason: 'too-many' })
+      // One summary record beats a path string for every excess entry: a
+      // backup zip can hold tens of thousands of them.
+      tooMany += 1
       continue
     }
 
     total += entry.originalSize
     selected.push({ path, original: entry.name })
   }
+
+  if (tooMany) skipped.push({ name: `其余 ${tooMany} 个文件`, reason: 'too-many' })
 
   if (!selected.length) {
     const detail = skipped.length ? `压缩包里的 ${skipped.length} 个文件都被跳过了（${skipped.map((item) => SKIP_REASON_LABELS[item.reason]).join('、')}）。` : '压缩包里没有文件。'

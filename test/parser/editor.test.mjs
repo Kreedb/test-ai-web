@@ -83,6 +83,21 @@ test('renaming a name that shares a deduped string detaches it and leaves the ot
   assert.equal(model.strings.find((entry) => entry.index === 1).text, 'AB')
 })
 
+test('clearing a name removes its string entry instead of keeping an empty slot', () => {
+  const model = createEditorModel(null)
+  model.strings = [{ index: 1, length: 2, text: 'AB', raw: [65, 66] }]
+  model.general.nameStringIndex = 1
+  model.general.deviceName = 'AB'
+  model.txPdos = []
+  model.rxPdos = []
+
+  setName(model, model.general, 'deviceName', 'nameStringIndex', '')
+
+  assert.equal(model.general.deviceName, '')
+  assert.equal(model.general.nameStringIndex, 0)
+  assert.equal(model.strings.length, 0)
+})
+
 test('removeString clears only the slot that owns the entry and remaps the rest', () => {
   const model = createEditorModel(null)
   model.strings = [

@@ -24,6 +24,15 @@ test('parses clk, wall clock and level, keeping continuation lines', () => {
   assert.equal(entries[2].level, 'E')
 })
 
+test('continues the same entries across split files without joining them', () => {
+  const first = parseLogText('[INFO] [1700000000.5]: one\n  continued')
+  const parsed = parseLogText('[INFO] [1700000001.5]: two', first)
+  assert.equal(parsed.entries.length, 2)
+  assert.equal(parsed.entries[0].text, '[INFO] [1700000000.5]: one\n  continued')
+  assert.equal(parsed.entries[1].text, '[INFO] [1700000001.5]: two')
+  assert.deepEqual(parsed.warnings, [])
+})
+
 test('aligns clk-based logs with monotonic bag times', () => {
   const { entries } = parseLogText(LOG)
   const aligned = alignLog(entries, 17, 18)

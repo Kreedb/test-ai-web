@@ -9,7 +9,7 @@
 | [replay](replay/README.md) | 机器人 bag 回放页面、机型骨架与限制 |
 | [convert](convert/README.md) | EDA 转 KiCad 页面与转换流水线 |
 | [convert/formats.md](convert/formats.md) | 支持的来源、识别方式与示例数据 |
-| [convert/losses.md](convert/losses.md) | 有损转换的类别与原因 |
+| [convert/losses.md](convert/losses.md) | 指向各格式模块 `losses` 数组的说明 |
 | [convert/preview.md](convert/preview.md) | 只读设计预览 |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 应用外壳、开发约定、代码结构、测试与部署 |
 | [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) | 第三方组件、示例数据许可与商标 |

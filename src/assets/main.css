@@ -857,10 +857,6 @@ section[id] {
   margin-top: 8px;
 }
 
-.check-grid.disabled {
-  opacity: 0.5;
-}
-
 .check {
   display: inline-flex;
   align-items: center;

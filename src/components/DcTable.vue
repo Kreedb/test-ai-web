@@ -1,26 +1,12 @@
 <script setup>
 import { dcRaw } from '@/lib/editor'
-import { hex, hexBytes, parseDecValue, parseHexValue } from '@/lib/format'
+import { hex, hexBytes, normalizedDec, normalizedHex } from '@/lib/format'
 
 defineProps({
   dc: { type: Object, required: true },
 })
 
 const emit = defineEmits(['update', 'add', 'remove'])
-
-// Write the parsed value back so an invalid entry does not keep its raw text
-// when the model value happens to stay the same.
-function normalizedHex(event, bits = 16) {
-  const value = parseHexValue(event.target.value) & ((1 << bits) - 1)
-  event.target.value = hex(value, bits / 4)
-  return value
-}
-
-function normalizedDec(event, max = 0xffff) {
-  const value = Math.min(Math.max(parseDecValue(event.target.value), 0), max)
-  event.target.value = String(value)
-  return value
-}
 </script>
 
 <template>
