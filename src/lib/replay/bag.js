@@ -28,9 +28,14 @@ export function sniffBagFormat(bytes) {
 
 function formatFiles(files, format) {
   const out = []
+  let total = 0
   for (const file of files) {
     if (file.bytes.byteLength > MAX_BAG_BYTES) {
       throw new Error(`${file.name} 超过 ${MAX_BAG_BYTES / 1024 / 1024} MiB，浏览器内回放会耗尽内存`)
+    }
+    total += file.bytes.byteLength
+    if (total > MAX_BAG_BYTES) {
+      throw new Error(`bag 合计超过 ${MAX_BAG_BYTES / 1024 / 1024} MiB，浏览器内回放会耗尽内存`)
     }
     const sniffed = sniffBagFormat(file.bytes)
     if (!sniffed) throw new Error(`${file.name} 不是 ROS1 bag、ROS2 MCAP 或 ROS2 sqlite3 bag`)
