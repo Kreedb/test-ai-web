@@ -6,7 +6,9 @@ convbin 是一个在浏览器中运行的二进制工具箱，当前包含 Ether
 
 ## 工具
 
-导航页（`#/`）统一管理所有工具，后续新增的工具会继续挂在这里。
+工作台（`#/`）统一管理所有工具。可以点击工具建议、在输入框描述任务，或附加文件后打开对应工具；导航侧栏也可直接进入页面。
+
+输入框仅在浏览器内按关键词和文件扩展名匹配工具，不是 AI 对话，不调用模型接口。匹配不明确时需手动选择工具；`.zip` 可能属于回放或转换，不能仅凭扩展名判断。附件只在内存中交给目标页面一次，并经过该工具原有的大小与格式校验，不写入浏览器存储，刷新后不会保留。`Enter` 打开工具，`Shift+Enter` 换行；手机上可展开侧栏，按 `Escape` 关闭。
 
 - [EEPROM 解析器](parser/README.md)（`#/parser`）
 - [机器人包回放](replay/README.md)（`#/replay`）
@@ -88,6 +90,7 @@ src/lib/esi.js             # ESI XML -> SII 生成器，以及 SII -> ESI XML �
 src/lib/editor.js          # 解析结果的可编辑模型：字符串/名称同步、列表增删、导出参数
 src/lib/format.js          # 显示格式化与字段解析辅助函数
 src/lib/download.js        # 浏览器下载辅助函数
+src/lib/workspace.js       # 首页任务匹配与一次性的内存附件交接
 src/lib/eda.js             # EDA -> KiCad 转换入口：上传限制、格式校验、结果封装
 src/lib/eda-shared.js      # 转换器共享的错误、识别辅助、结果汇总与 KiCad 写出
 src/lib/formats/           # 每种来源一个模块：元数据、有损说明、样例、识别与转换入口
@@ -104,11 +107,12 @@ src/lib/replay/pose.js     # 骨架正运动学与四元数工具（无 Vue 依�
 src/lib/replay/urdf.js     # URDF 解析与 STL 读取
 public/robots/             # 预置机型 URDF（Luna / Oli / TRON2A）
 src/lib/route-path.js      # hash 路径归一化与路由匹配（无 Vue 依赖，供路由与链接共用）
-src/routes.js              # 按 src/pages/*Page.vue 自动收集路由、导航与首页工具卡片
+src/routes.js              # 按 src/pages/*Page.vue 自动收集路由、导航与首页工具入口
 src/router.js              # 极简 hash 路由（GitHub Pages 子路径下无需重写规则）
-src/pages/                 # 解析器页、机器人回放页、EDA 转换页（首页在 App.vue）
+src/pages/                 # 解析器页、机器人回放页、EDA 转换页
+src/components/HomeWorkspace.vue # 首页任务输入、附件与工具建议
 src/components/            # 可编辑表格、PDO、DC、十六进制视图、设计预览、机器人骨架、格式支持与有损表
-src/App.vue                # 页面外壳：品牌、导航、首页、路由出口、页脚
+src/App.vue                # 页面外壳：可折叠侧栏、顶栏、路由出口、页脚
 public/samples/            # 示例 EEPROM 转储、ESI XML、Altium / Specctra / EAGLE / PADS 工程文件
 build/offline.js           # 构建时生成离线用 Service Worker（预缓存全部产物与解析器示例）
 ```
@@ -159,6 +163,7 @@ npm run build
 
 ### 样式与依赖
 
+- 视觉方向参考 GitHub 官方 [`frontend-design`](https://github.com/anthropics/skills/blob/2c5958ecac7cee2b583967a2c4981d0f4a75c579/skills/frontend-design/SKILL.md) 与 [`brand-guidelines`](https://github.com/anthropics/skills/blob/2c5958ecac7cee2b583967a2c4981d0f4a75c579/skills/brand-guidelines/SKILL.md) skill：暖纸色、陶土强调色、克制的按钮层级与留白。保留 `convbin` 品牌，不使用 Claude 商标或添加远程字体；PCB、原理图和回放画布保留深色工程底板以确保图层对比度。
 - 页面级样式优先写在组件的 `<style scoped>` 里；`src/assets/main.css` 只保留设计变量、基础排版和跨页面共用样式。
 - 新增运行时依赖前先确认许可证与仓库的 GPL-3.0-only 兼容，并更新 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
 - 不要在 PR 中直接格式化 `package-lock.json`；需要升级时单独提交，并说明升级原因。
@@ -178,6 +183,8 @@ npm test
 - `test/convert/`：EDA 转 KiCad（`#/convert`）的格式识别、转换、预览与注册表测试。
 - `test/fixtures/`：转换器回归样例。
 - `test/routes.test.mjs`：hash 路径归一化与匹配（全功能测试，保留在 `test/` 根目录）。
+- `test/workspace.test.mjs`：本地任务匹配、歧义处理与一次性的附件交接。
+- `test/workspace-ui.test.mjs`：真实 Vue 组件的建议匹配、导航草稿与无效导入保留编辑回归测试。
 - `test/lib.test.mjs`：`lib/` 包的 README、入口与解耦约束。
 - `test/offline.test.mjs`：离线 Service Worker 生成。
 

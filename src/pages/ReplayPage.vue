@@ -25,6 +25,7 @@ import { buildJointValues, computePose, normalizeQuat, quatToEuler } from '@/lib
 import { ALL_PROFILES, attachSkeleton, detectProfile, mapJoints } from '@/lib/replay/profiles'
 import { MAX_BAG_BYTES } from '@/lib/replay/rosbag'
 import { parseStl, parseUrdf, smoothNormals } from '@/lib/replay/urdf'
+import { takeQueuedFiles } from '@/lib/workspace'
 
 const SAMPLE = { file: 'samples/replay/luna-demo.bag', label: 'Luna 动作' }
 const MESH_MAX_BYTES = 96 * 1024 * 1024
@@ -37,6 +38,7 @@ const MESH_PACKAGES = {
 const fileName = ref('')
 const sampleName = ref('')
 const error = ref('')
+const inputNotice = ref('')
 const busy = ref(false)
 const progress = ref(0)
 const dragging = ref(false)
@@ -71,6 +73,7 @@ const playing = ref(false)
 const speed = ref(1)
 const loop = ref(false)
 const jointGap = ref(0.1)
+const fileInput = ref(null)
 const stage = ref(null)
 const isFullscreen = ref(false)
 
@@ -105,6 +108,15 @@ const logIndex = computed(() => {
 })
 
 const logBasis = computed(() => (logAligned.value.basis === 'clk' ? 'clk 单调时钟' : '墙钟时间'))
+const workflowStatus = computed(() => {
+  if (logBusy.value) return '正在读取并解析日志…'
+  if (busy.value) return progress.value > 0 ? `bag 已解析 ${progress.value}%，正在准备回放…` : '正在读取文件、识别话题或准备机器人模型…'
+  if (error.value || logError.value) return '部分文件未能读取，请检查下方提示后重试。'
+  if (result.value) return `已载入 ${fileName.value}，回放时长 ${formatTime(duration.value)}。可以播放或拖动时间轴。`
+  if (logEntries.value.length || customUrdf.value) return '日志或 URDF 已载入，再添加一个含关节话题的 bag 即可回放。'
+  if (inputNotice.value || meshErrors.value.length) return '模型文件尚未就绪，请检查下方提示并添加对应的 URDF / STL。'
+  return '文件在浏览器本地解析，不会上传。也可以先试用 Luna 动作示例。'
+})
 
 const parseLabel = computed(() => {
   const selected = topics.value.filter((topic) => topic.name === jointTopic.value || topic.name === imuTopic.value)
@@ -414,6 +426,7 @@ async function loadMeshes() {
 }
 
 async function applyTopics(files, jointName, imuName) {
+  pause()
   busy.value = true
   error.value = ''
   progress.value = 0
@@ -520,7 +533,8 @@ async function useUrdf(urdf, meshEntries) {
 }
 
 async function loadSample() {
-  if (busy.value) return
+  if (busy.value || logBusy.value) return
+  pause()
   busy.value = true
   error.value = ''
   try {
@@ -577,8 +591,10 @@ async function expandInputFiles(input) {
 
 async function handleFiles(input) {
   if (busy.value || logBusy.value) return
+  pause()
   busy.value = true
   error.value = ''
+  inputNotice.value = ''
   try {
     const entries = await expandInputFiles(input)
     const bags = []
@@ -607,10 +623,14 @@ async function handleFiles(input) {
         urdf,
         meshEntries.filter((item) => /\.stl$/i.test(item.name)),
       )
-    else if (meshEntries.length && customUrdf.value) {
-      addMeshSources(meshEntries.filter((item) => /\.stl$/i.test(item.name)))
-      meshEnabled.value = true
-      if (result.value) await loadMeshes()
+    else if (meshEntries.length) {
+      if (customUrdf.value) {
+        addMeshSources(meshEntries.filter((item) => /\.stl$/i.test(item.name)))
+        meshEnabled.value = true
+        if (result.value) await loadMeshes()
+      } else {
+        inputNotice.value = '网格需要对应的 URDF。请将 .urdf 与 STL 一起添加，或先载入 URDF 后再添加 STL。'
+      }
     }
     if (logs.length) await handleLogs(logs)
     if (bags.length) await loadBagFiles(bags)
@@ -634,22 +654,24 @@ function onFileChange(event) {
 }
 
 async function reloadFormat() {
-  if (!bagFiles.value.length || busy.value) return
+  if (!bagFiles.value.length || busy.value || logBusy.value) return
   await loadBagFiles(bagFiles.value, sampleName.value)
 }
 
 async function reparse() {
-  if (!bagFiles.value.length || !jointTopic.value) return
+  if (busy.value || logBusy.value || !bagFiles.value.length || !jointTopic.value) return
   await applyTopics(bagFiles.value, jointTopic.value, imuTopic.value || '')
 }
 
 async function changeProfile() {
+  if (busy.value || logBusy.value) return
   if (profileChoice.value === 'custom' && !customUrdf.value) {
     error.value = '请先上传 .urdf 文件（可同时选择同目录的 STL，或上传包含网格的 zip）'
     profileChoice.value = 'auto'
     return
   }
-  if (!result.value || !jointSeries.value || busy.value) return
+  if (!result.value || !jointSeries.value) return
+  pause()
   busy.value = true
   try {
     await mountModel(jointSeries.value)
@@ -661,6 +683,7 @@ async function changeProfile() {
 }
 
 async function toggleMeshes() {
+  if (busy.value || logBusy.value) return
   if (!urdfMeshSource.value.defs.length && meshEnabled.value) {
     meshStatus.value = '当前 URDF 没有引用网格'
   }
@@ -670,6 +693,7 @@ async function toggleMeshes() {
 function fail(cause) {
   pause()
   error.value = messageOf(cause)
+  inputNotice.value = ''
   result.value = null
   profile.value = null
   mapping.value = { entries: [], unmapped: [] }
@@ -687,6 +711,7 @@ function fail(cause) {
 }
 
 function clearAll() {
+  if (busy.value || logBusy.value) return
   pause()
   fail('')
   error.value = ''
@@ -702,12 +727,13 @@ function clearAll() {
 }
 
 function toggle() {
+  if (busy.value || logBusy.value) return
   if (playing.value) pause()
   else play()
 }
 
 function play() {
-  if (!result.value || duration.value <= 0) return
+  if (busy.value || logBusy.value || !result.value || duration.value <= 0) return
   if (current.value >= duration.value) current.value = 0
   playing.value = true
   lastFrame = 0
@@ -739,6 +765,7 @@ function tick(timestamp) {
 }
 
 function step(direction) {
+  if (busy.value || logBusy.value) return
   const series = jointSeries.value
   if (!series) return
   pause()
@@ -747,11 +774,13 @@ function step(direction) {
 }
 
 function seek(event) {
+  if (busy.value || logBusy.value) return
   pause()
   current.value = Math.max(0, Math.min(duration.value, Number(event.target.value)))
 }
 
 function seekWave(seconds) {
+  if (busy.value || logBusy.value) return
   pause()
   current.value = Math.max(0, Math.min(duration.value, seconds))
 }
@@ -766,7 +795,7 @@ function onFullscreenChange() {
 }
 
 function onKeydown(event) {
-  if (event.repeat) return
+  if (event.repeat || busy.value || logBusy.value) return
   // Do not steal Space/arrows from a focused control (sample button, link,
   // details summary, editable field).
   if (event.target?.closest?.('input, textarea, select, button, a, summary, [contenteditable]')) return
@@ -787,6 +816,8 @@ function onKeydown(event) {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   document.addEventListener('fullscreenchange', onFullscreenChange)
+  const files = takeQueuedFiles('replay')
+  if (files.length) handleFiles(files)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
@@ -796,43 +827,116 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="app-main">
-    <section class="card input-card">
-      <div class="card-head">
-        <h2>导入机器人 bag、日志与 URDF</h2>
+  <main class="app-main tool-main">
+    <header class="tool-intro">
+      <p class="tool-eyebrow">convbin / 机器人回放</p>
+      <h1>机器人包回放</h1>
+      <p class="tool-description">沿着时间轴检查关节与 IMU，把姿态、波形和日志放在一起看。</p>
+    </header>
+
+    <section class="card input-card" :aria-busy="busy || logBusy" aria-labelledby="replay-input-title">
+      <div class="card-head input-head">
+        <span class="input-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M4 5h16v14H4zM9 5V3m6 2V3M9 21v-2m6 2v-2M8 10h.01M16 10h.01M8 14h8" />
+          </svg>
+        </span>
+        <div class="input-title">
+          <h2 id="replay-input-title">导入机器人 bag、日志与 URDF</h2>
+          <p class="muted small">可多选，也可以把相关文件放进同一个 ZIP。</p>
+        </div>
         <span v-if="fileName" class="badge">{{ fileName }}</span>
         <span v-if="logName" class="badge">{{ logName }}</span>
       </div>
 
-      <label class="drop-zone" :class="{ dragging }" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="onDrop">
-        <input type="file" multiple accept=".bag,.active,.mcap,.db3,.zip,.log,.txt,.urdf,.stl,.dae,.obj" :disabled="busy || logBusy" @change="onFileChange" />
-        <span class="drop-title">拖拽 ROS1 bag、ROS2 MCAP / .db3、.zip、.log 或 .urdf，或点击选择文件</span>
-        <span class="drop-hint">
-          JointState + IMU · ROS1 未压缩或 lz4 · ROS2 MCAP（lz4 / 未压缩）与 sqlite3 · 自动识别 LimX 自定义消息 · .active 自动恢复 · 日志按 clk / 时间戳对齐 · bag 最大
-          {{ formatBytes(MAX_BAG_BYTES) }} · 日志最大 {{ formatBytes(MAX_LOG_BYTES) }} · 数据只在浏览器本地处理
+      <label
+        class="drop-zone"
+        :class="{ dragging: dragging && !busy && !logBusy }"
+        :aria-disabled="busy || logBusy"
+        @dragover.prevent="dragging = !busy && !logBusy"
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="onDrop"
+      >
+        <input
+          ref="fileInput"
+          type="file"
+          multiple
+          accept=".bag,.active,.mcap,.db3,.zip,.log,.txt,.urdf,.stl,.dae,.obj"
+          :disabled="busy || logBusy"
+          aria-label="选择机器人 bag、日志或模型文件"
+          aria-describedby="replay-drop-hint"
+          @change="onFileChange"
+        />
+        <span class="drop-icon" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M4 16.5V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5M12 16V3m-5 5 5-5 5 5" />
+          </svg>
+        </span>
+        <span class="drop-title">拖入回放文件，或点击选择</span>
+        <span id="replay-drop-hint" class="drop-hint">
+          .bag / .active / .mcap / .db3 · ZIP、日志与 URDF / STL · bag 最大 {{ formatBytes(MAX_BAG_BYTES) }} · 日志合计 {{ formatBytes(MAX_LOG_BYTES) }}
         </span>
       </label>
 
-      <div class="actions">
-        <label class="format-select">
-          <span>bag 格式</span>
-          <select v-model="formatMode" :disabled="busy" @change="reloadFormat">
-            <option v-for="item in BAG_FORMATS" :key="item.id" :value="item.id">{{ item.label }}</option>
-          </select>
-        </label>
-        <span v-if="bagFormat" class="badge">{{ FORMAT_LABELS[bagFormat] }}</span>
-        <button type="button" class="btn" :disabled="busy" @click="loadSample">示例：{{ SAMPLE.label }}</button>
-        <button type="button" class="btn ghost" :disabled="busy || logBusy" @click="clearAll">清空</button>
-        <span v-if="sampleName" class="muted small">示例：{{ sampleName }}</span>
-        <span v-if="busy" class="muted small">正在解析 {{ progress }}%…</span>
-        <span v-if="logBusy" class="muted small">正在解析日志…</span>
+      <div class="actions composer-actions">
+        <div class="sample-actions">
+          <button type="button" class="btn" :disabled="busy || logBusy" @click="loadSample">示例：{{ SAMPLE.label }}</button>
+          <label class="format-select">
+            <span>bag 格式</span>
+            <select v-model="formatMode" :disabled="busy || logBusy" @change="reloadFormat">
+              <option v-for="item in BAG_FORMATS" :key="item.id" :value="item.id">{{ item.label }}</option>
+            </select>
+          </label>
+          <span v-if="bagFormat" class="badge">{{ FORMAT_LABELS[bagFormat] }}</span>
+        </div>
+        <div class="primary-actions">
+          <button
+            type="button"
+            class="btn ghost"
+            :disabled="busy || logBusy || (!fileName && !logName && !customUrdf && !error && !inputNotice && !logError && !meshSources.size && !meshErrors.length)"
+            @click="clearAll"
+          >
+            清空
+          </button>
+        </div>
       </div>
+      <p class="workflow-status" role="status" aria-live="polite">{{ workflowStatus }}</p>
+      <p v-if="inputNotice" class="warn-inline">{{ inputNotice }}</p>
+      <p v-if="sampleName" class="muted small">当前示例：{{ sampleName }}</p>
+
+      <details class="reference-section">
+        <summary class="reference-summary">支持的文件与处理限制</summary>
+        <div class="reference-body">
+          <p class="muted small">
+            支持 ROS1 .bag / .active（未压缩或 lz4）、ROS2 .mcap（未压缩或 lz4）与 SQLite .db3。自动识别 LimX 自定义消息；未完成的 .active 会恢复完整数据块。至少需要一个可解析的关节话题，IMU 可选。
+          </p>
+          <p class="muted small">
+            .log / .txt 按 clk 或时间戳对齐。每个 ZIP 在本地解开，最多 512 个条目，包内单个文件与解压合计均不超过 {{ formatBytes(MAX_BAG_BYTES) }}。STL 网格加载合计上限
+            {{ formatBytes(MESH_MAX_BYTES) }}；.dae / .obj 与 .xacro 暂不支持，请先转换为 STL / URDF。
+          </p>
+          <p class="muted small">文件内容不会上传。预置 URDF 由本站载入；勾选“加载 3D 模型”后，部分模型会按需从 GitHub 下载网格，也可自行添加本地 STL。</p>
+        </div>
+      </details>
     </section>
 
     <div v-if="error" class="card error-card" role="alert">
       <strong>无法回放</strong>
       <p>{{ error }}</p>
     </div>
+
+    <div v-if="logError && !result" class="card error-card" role="alert">
+      <strong>日志未能读取</strong>
+      <p>{{ logError }}</p>
+    </div>
+
+    <section v-if="allWarnings.length" class="card warnings-card">
+      <h2>提示（{{ allWarnings.length }}）</h2>
+      <ul class="warning-list">
+        <li v-for="(warning, index) in allWarnings" :key="index" :class="`warn-${warning.level}`">
+          {{ warning.message }}
+        </li>
+      </ul>
+    </section>
 
     <template v-if="result">
       <section class="stats-grid" aria-label="回放概览">
@@ -843,15 +947,6 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section v-if="allWarnings.length" class="card warnings-card">
-        <h2>提示（{{ allWarnings.length }}）</h2>
-        <ul class="warning-list">
-          <li v-for="(warning, index) in allWarnings" :key="index" :class="`warn-${warning.level}`">
-            {{ warning.message }}
-          </li>
-        </ul>
-      </section>
-
       <section class="card">
         <div class="card-head">
           <h2>话题、型号与 URDF</h2>
@@ -860,20 +955,20 @@ onBeforeUnmount(() => {
         <div class="topic-grid">
           <label>
             <span>关节话题</span>
-            <select v-model="jointTopic" :disabled="busy" @change="reparse">
+            <select v-model="jointTopic" :disabled="busy || logBusy" @change="reparse">
               <option v-for="topic in jointTopics" :key="topic.name" :value="topic.name">{{ topic.name }} · {{ topic.type }}</option>
             </select>
           </label>
           <label>
             <span>IMU 话题</span>
-            <select v-model="imuTopic" :disabled="busy" @change="reparse">
+            <select v-model="imuTopic" :disabled="busy || logBusy" @change="reparse">
               <option value="">不使用（底座姿态固定）</option>
               <option v-for="topic in imuTopics" :key="topic.name" :value="topic.name">{{ topic.name }} · {{ topic.type }}</option>
             </select>
           </label>
           <label>
             <span>骨架 / URDF</span>
-            <select v-model="profileChoice" :disabled="busy" @change="changeProfile">
+            <select v-model="profileChoice" :disabled="busy || logBusy" @change="changeProfile">
               <option value="auto">自动识别（按关节名）</option>
               <option v-for="item in ALL_PROFILES" :key="item.id" :value="item.id">{{ item.label }}</option>
               <option value="custom">自定义 URDF</option>
@@ -881,11 +976,11 @@ onBeforeUnmount(() => {
           </label>
         </div>
         <div class="urdf-row">
-          <label class="btn ghost file-btn">
+          <label class="btn ghost file-btn" :aria-disabled="busy || logBusy">
             上传 URDF / STL / ZIP
-            <input type="file" multiple accept=".urdf,.stl,.zip,.dae,.obj" :disabled="busy" @change="onFileChange" />
+            <input type="file" multiple accept=".urdf,.stl,.zip,.dae,.obj" :disabled="busy || logBusy" aria-label="上传 URDF、STL 或 ZIP 模型文件" @change="onFileChange" />
           </label>
-          <label class="loop-label"><input v-model="meshEnabled" type="checkbox" :disabled="busy" @change="toggleMeshes" /> 加载 3D 模型</label>
+          <label class="loop-label"><input v-model="meshEnabled" type="checkbox" :disabled="busy || logBusy" @change="toggleMeshes" /> 加载 3D 模型</label>
           <span v-if="customUrdf" class="muted small">{{ customUrdf.name }}</span>
           <span v-if="meshStatus" class="muted small">{{ meshStatus }}</span>
         </div>
@@ -963,20 +1058,20 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="playback-bar">
-            <button type="button" class="btn primary icon-btn" @click="toggle">
+            <button type="button" class="btn primary icon-btn" :disabled="busy || logBusy" @click="toggle">
               {{ playing ? '暂停' : '播放' }}
             </button>
-            <button type="button" class="btn ghost icon-btn" title="上一帧" @click="step(-1)">‹</button>
-            <button type="button" class="btn ghost icon-btn" title="下一帧" @click="step(1)">›</button>
-            <input class="playback-range" type="range" min="0" :max="duration" step="0.001" :value="current" aria-label="回放时间" @input="seek" />
+            <button type="button" class="btn ghost icon-btn" :disabled="busy || logBusy" title="上一帧" aria-label="上一帧" @click="step(-1)">‹</button>
+            <button type="button" class="btn ghost icon-btn" :disabled="busy || logBusy" title="下一帧" aria-label="下一帧" @click="step(1)">›</button>
+            <input class="playback-range" type="range" min="0" :max="duration" step="0.001" :value="current" :disabled="busy || logBusy" aria-label="回放时间" @input="seek" />
             <span class="mono time-label">{{ formatTime(current) }} / {{ formatTime(duration) }}</span>
-            <select v-model.number="speed" class="mono" aria-label="播放速度">
+            <select v-model.number="speed" class="mono" :disabled="busy || logBusy" aria-label="播放速度">
               <option :value="0.25">0.25×</option>
               <option :value="0.5">0.5×</option>
               <option :value="1">1×</option>
               <option :value="2">2×</option>
             </select>
-            <label class="loop-label"><input v-model="loop" type="checkbox" /> 循环</label>
+            <label class="loop-label"><input v-model="loop" type="checkbox" :disabled="busy || logBusy" /> 循环</label>
           </div>
         </section>
 
@@ -986,7 +1081,7 @@ onBeforeUnmount(() => {
             <span v-if="logName" class="badge">{{ logName }}</span>
           </div>
 
-          <p v-if="logError" class="warn-warn">{{ logError }}</p>
+          <p v-if="logError" class="warn-warn" role="alert">{{ logError }}</p>
           <template v-else-if="logEntries.length">
             <p class="muted small">
               {{ logEntries.length.toLocaleString() }} 条带时间戳的日志
@@ -1017,6 +1112,26 @@ onBeforeUnmount(() => {
         <SignalChart :rows="waveRows" :start-time="startTime" :duration="duration" :current="current" empty-message="没有可绘制的关节或 IMU 数据" @seek="seekWave" />
       </section>
     </template>
+
+    <section v-else-if="!busy && !logBusy && !error" class="empty-state">
+      <span class="empty-icon" aria-hidden="true">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+          <circle cx="12" cy="12" r="9" />
+          <path d="m10 8 6 4-6 4z" />
+        </svg>
+      </span>
+      <h2>{{ logEntries.length || customUrdf ? '资料已就绪，还需要一个 bag' : '从一段机器人记录开始' }}</h2>
+      <p v-if="logEntries.length || customUrdf">
+        <template v-if="logEntries.length">已读取 {{ logEntries.length.toLocaleString() }} 条日志。 </template>
+        <template v-if="customUrdf">已载入 {{ customUrdf.name }}。 </template>
+        添加含关节话题的 bag 后即可对齐时间并查看姿态。
+      </p>
+      <p v-else>导入一个包含关节话题的 ROS1 / ROS2 bag，或点击上方的 Luna 动作示例。日志、URDF 与 STL 都可以稍后补充。</p>
+      <p><button type="button" class="linkish" @click="fileInput?.click()">选择回放文件 →</button></p>
+      <ul v-if="logWarnings.length" class="warning-list">
+        <li v-for="(warning, index) in logWarnings" :key="index" :class="`warn-${warning.level}`">{{ warning.message }}</li>
+      </ul>
+    </section>
   </main>
 </template>
 
@@ -1085,6 +1200,18 @@ onBeforeUnmount(() => {
   color: var(--text);
   font-family: var(--mono);
   font-size: 0.8rem;
+}
+
+.topic-grid select:focus-visible,
+.format-select select:focus-visible,
+.file-btn:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.file-btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .format-select {

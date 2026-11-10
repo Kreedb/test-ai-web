@@ -12,7 +12,7 @@ export const route = {
 </script>
 
 <script setup>
-import { computed, ref, shallowRef } from 'vue'
+import { computed, onMounted, ref, shallowRef } from 'vue'
 
 import ConvertDropZone from '@/components/ConvertDropZone.vue'
 import EdaPreview from '@/components/EdaPreview.vue'
@@ -23,10 +23,13 @@ import { downloadBlob, fileBaseName } from '@/lib/download'
 import { MAX_INPUT_BYTES, MAX_TOTAL_BYTES, convertEda } from '@/lib/eda'
 import { CONVERTIBLE_FORMATS, SAMPLES, detectSource, formatLabel } from '@/lib/formats/index.js'
 import { formatBytes } from '@/lib/format'
+import { takeQueuedFiles } from '@/lib/workspace'
 
 const entries = ref([])
 const dragging = ref(false)
 const busy = ref(false)
+const busyMessage = ref('')
+const converting = ref(false)
 const error = ref('')
 const errorDetail = ref('')
 const sampleLabel = ref('')
@@ -55,6 +58,16 @@ const sourceFormats = computed(() => new Set(entries.value.map((entry) => format
 const mixedFormats = computed(() => sourceFormats.value.size > 1)
 
 const canConvert = computed(() => sourceFormats.value.size > 0 && !mixedFormats.value && !unsupportedEntries.value.length)
+const workflowStatus = computed(() => {
+  if (busy.value) return busyMessage.value
+  if (error.value) return '操作未完成，请检查下方提示后重试。'
+  if (result.value) return `转换完成，已生成 ${result.value.files.length} 个 KiCad 文件。请下载并核对转换提示。`
+  if (mixedFormats.value) return '请只保留同一种来源的工程文件，再开始转换。'
+  if (unsupportedEntries.value.length) return '所选文件包含尚未支持的格式，请移除后重试。'
+  if (canConvert.value) return `已准备 ${entries.value.length} 个文件，点击“转换为 KiCad”继续。`
+  if (entries.value.length) return '还没有可转换的文件，请添加受支持的设计文档。'
+  return '添加工程文件，或选择一个示例。文件只在浏览器本地处理。'
+})
 
 const stats = computed(() => {
   const outcome = result.value
@@ -155,6 +168,7 @@ async function addFiles(fileList) {
   const files = Array.from(fileList || [])
   if (!files.length) return
   busy.value = true
+  busyMessage.value = '正在读取文件并在本地展开压缩包…'
   error.value = ''
   errorDetail.value = ''
   try {
@@ -194,8 +208,14 @@ async function addFiles(fileList) {
     error.value = cause.message
   } finally {
     busy.value = false
+    busyMessage.value = ''
   }
 }
+
+onMounted(() => {
+  const files = takeQueuedFiles('convert')
+  if (files.length) addFiles(files)
+})
 
 function removeEntry(index) {
   if (busy.value) return
@@ -211,6 +231,7 @@ function removeEntry(index) {
 async function loadSample(sample) {
   if (busy.value) return
   busy.value = true
+  busyMessage.value = `正在载入 ${sample.label} 示例…`
   error.value = ''
   errorDetail.value = ''
   try {
@@ -236,12 +257,15 @@ async function loadSample(sample) {
     error.value = cause.message
   } finally {
     busy.value = false
+    busyMessage.value = ''
   }
 }
 
 async function runConversion() {
-  if (busy.value) return
+  if (busy.value || !canConvert.value) return
   busy.value = true
+  converting.value = true
+  busyMessage.value = '正在转换为 KiCad…'
   error.value = ''
   errorDetail.value = ''
   result.value = null
@@ -253,23 +277,30 @@ async function runConversion() {
     errorDetail.value = cause.detail || ''
   } finally {
     busy.value = false
+    busyMessage.value = ''
+    converting.value = false
   }
 }
 
 function downloadFile(file) {
+  if (busy.value) return
   downloadBlob(file.content, file.name, 'text/plain;charset=utf-8')
 }
 
 async function downloadArchive() {
+  if (busy.value || !result.value) return
+  const outcome = result.value
+  const name = projectName.value
   const { zipSync } = await import('fflate')
   const bundle = {}
-  for (const file of result.value.files) {
+  for (const file of outcome.files) {
     bundle[file.name] = new TextEncoder().encode(file.content)
   }
-  downloadBlob(zipSync(bundle, { level: 6 }), `${projectName.value}.zip`, 'application/zip')
+  downloadBlob(zipSync(bundle, { level: 6 }), `${name}.zip`, 'application/zip')
 }
 
 function clearAll() {
+  if (busy.value) return
   entries.value = []
   archives.value = []
   archiveNotes.value = []
@@ -281,10 +312,26 @@ function clearAll() {
 </script>
 
 <template>
-  <main class="app-main">
-    <section class="card input-card">
-      <div class="card-head">
-        <h2>输入 EDA 工程文件</h2>
+  <main class="app-main tool-main">
+    <header class="tool-intro">
+      <p class="tool-eyebrow">convbin / EDA</p>
+      <h1>EDA 转 KiCad</h1>
+      <p class="tool-description">把现有设计带到 KiCad。添加同一来源的工程文件，转换后预览并下载。</p>
+    </header>
+
+    <section class="card input-card" :aria-busy="busy" aria-labelledby="convert-input-title">
+      <div class="card-head input-head">
+        <span class="input-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M4 4h16v16H4zM4 9h6v6h10M14 4v5h6M9 15v5" />
+            <circle cx="10" cy="9" r="1" />
+            <circle cx="14" cy="9" r="1" />
+          </svg>
+        </span>
+        <div class="input-title">
+          <h2 id="convert-input-title">输入 EDA 工程文件</h2>
+          <p class="muted small">支持 Altium、Specctra、EAGLE XML 与 PADS Layout ASCII。</p>
+        </div>
         <span v-if="entries.length" class="badge">{{ entries.length }} 个文件</span>
       </div>
 
@@ -298,7 +345,7 @@ function clearAll() {
           </div>
           <span class="chip">{{ formatLabel(formatOf(entry).id) }}</span>
           <span class="muted small nowrap">{{ formatBytes(entry.bytes.length) }}</span>
-          <button type="button" class="btn ghost small" :disabled="busy" @click="removeEntry(index)">移除</button>
+          <button type="button" class="btn ghost small" :disabled="busy" :aria-label="`移除 ${entry.name}`" @click="removeEntry(index)">移除</button>
         </li>
       </ul>
 
@@ -320,14 +367,20 @@ function clearAll() {
       <p v-else-if="unsupportedEntries.length" class="warn-inline">{{ entryNames(unsupportedEntries) }} 的格式尚未接入，见下方支持列表。</p>
       <p v-else-if="ignoredEntries.length" class="muted small">{{ entryNames(ignoredEntries) }} 不是可转换的输入（工程侧文件如 .PrjPcb，或缺少 PADS-POWERPCB 版本头的 .asc），已忽略。</p>
 
-      <div class="actions">
-        <button type="button" class="btn primary" :disabled="busy || !canConvert" @click="runConversion">
-          {{ busy ? '转换中…' : '转换为 KiCad' }}
-        </button>
-        <button v-for="sample in SAMPLES" :key="sample.label" type="button" class="btn" :disabled="busy || entries.length > 0" @click="loadSample(sample)">示例：{{ sample.label }}</button>
-        <button type="button" class="btn ghost" :disabled="busy || !entries.length" @click="clearAll">清空</button>
-        <span v-if="sampleLabel" class="muted small">示例：{{ sampleLabel }}</span>
+      <div class="actions composer-actions">
+        <div class="sample-actions">
+          <button v-for="sample in SAMPLES" :key="sample.label" type="button" class="btn" :disabled="busy || entries.length > 0" @click="loadSample(sample)">示例：{{ sample.label }}</button>
+        </div>
+        <div class="primary-actions">
+          <button type="button" class="btn ghost" :disabled="busy || (!entries.length && !error)" @click="clearAll">清空</button>
+          <button type="button" class="btn primary" :disabled="busy || !canConvert" @click="runConversion">
+            {{ converting ? '转换中…' : '转换为 KiCad' }}
+          </button>
+        </div>
       </div>
+      <p class="workflow-status" role="status" aria-live="polite">{{ workflowStatus }}</p>
+      <p v-if="sampleLabel" class="muted small">当前示例：{{ sampleLabel }}</p>
+      <p class="muted small">转换可能简化或丢失部分信息。下载后请在 KiCad 中核对敷铜、3D 模型与设计规则；完整说明见下方。</p>
     </section>
 
     <div v-if="error" class="card error-card" role="alert">
@@ -354,8 +407,6 @@ function clearAll() {
         </ul>
       </section>
 
-      <EdaPreview v-if="result.circuitJson?.length" :circuit-json="result.circuitJson" />
-
       <section class="card">
         <div class="card-head">
           <h2>输出文件</h2>
@@ -365,35 +416,51 @@ function clearAll() {
           <li v-for="file in result.files" :key="file.name" class="file-row">
             <span class="file-name mono">{{ file.name }}</span>
             <span class="muted small nowrap">{{ formatBytes(file.size) }}</span>
-            <button type="button" class="btn small" @click="downloadFile(file)">下载</button>
+            <button type="button" class="btn small" :disabled="busy" :aria-label="`下载 ${file.name}`" @click="downloadFile(file)">下载</button>
           </li>
         </ul>
         <div class="actions">
-          <button v-if="result.files.length > 1" type="button" class="btn primary" @click="downloadArchive">打包下载 {{ projectName }}.zip</button>
+          <button v-if="result.files.length > 1" type="button" class="btn primary" :disabled="busy" @click="downloadArchive">打包下载 {{ projectName }}.zip</button>
           <span class="muted small"> 层次化原理图（根图 + 子图）必须放在同一目录下，KiCad 才能解析图纸引用。 </span>
         </div>
       </section>
+
+      <EdaPreview v-if="result.circuitJson?.length" :circuit-json="result.circuitJson" />
     </template>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>哪些信息可能无法无损转换</h2>
-        <span class="badge">有损转换</span>
-      </div>
-      <p class="muted small">
-        所有来源先解析为统一的 Circuit JSON，再写出 KiCad（.kicad_pcb / .kicad_sch / .kicad_pro）。 下表按“来源 × 信息类别”列出会被简化或丢失的内容；导入 KiCad 后请逐项核对，并重新设置敷铜、3D
-        模型与设计规则。
-      </p>
-      <LossTable />
+    <section v-else-if="!entries.length && !error && !busy" class="empty-state">
+      <span class="empty-icon" aria-hidden="true">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8m-8 4h5" />
+        </svg>
+      </span>
+      <h2>从你的设计文件开始</h2>
+      <p>将工程文件或 ZIP 拖到上方，或选一个示例试用。确认文件列表后，点击“转换为 KiCad”，即可查看输出与转换提示。</p>
     </section>
 
-    <section class="card">
-      <h2>支持的格式</h2>
-      <SupportMatrix />
-      <p class="export-note">
-        转换器来自 tscircuit 的开源项目：altium-to-circuit-json、dsn-to-circuit-json、circuit-json-to-kicad（均为 MIT）。 EAGLE XML 与 PADS Layout ASCII 由本仓库的
-        lib/eagle-to-circuit-json、lib/pads-to-circuit-json 解析（fast-xml-parser，MIT）， zip 压缩包由 src/lib/archive.js 用 fflate（MIT）在本地解开。 文件不会上传到任何服务器。
-      </p>
-    </section>
+    <details class="card reference-section">
+      <summary class="reference-summary">
+        <span>哪些信息可能无法无损转换</span>
+        <span class="badge">有损转换</span>
+      </summary>
+      <div class="reference-body">
+        <p class="muted small">
+          所有来源先解析为统一的 Circuit JSON，再写出 KiCad（.kicad_pcb / .kicad_sch / .kicad_pro）。 下表按“来源 × 信息类别”列出会被简化或丢失的内容；导入 KiCad 后请逐项核对，并重新设置敷铜、3D
+          模型与设计规则。
+        </p>
+        <LossTable />
+      </div>
+    </details>
+
+    <details class="card reference-section">
+      <summary class="reference-summary">支持的格式</summary>
+      <div class="reference-body">
+        <SupportMatrix />
+        <p class="export-note">
+          转换器来自 tscircuit 的开源项目：altium-to-circuit-json、dsn-to-circuit-json、circuit-json-to-kicad（均为 MIT）。 EAGLE XML 与 PADS Layout ASCII 由本仓库的
+          lib/eagle-to-circuit-json、lib/pads-to-circuit-json 解析（fast-xml-parser，MIT）， zip 压缩包由 src/lib/archive.js 用 fflate（MIT）在本地解开。 文件不会上传到任何服务器。
+        </p>
+      </div>
+    </details>
   </main>
 </template>
