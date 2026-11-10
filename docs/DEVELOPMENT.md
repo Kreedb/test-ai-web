@@ -24,7 +24,7 @@ npm install
 npm run dev
 ```
 
-开发服务器运行在 http://localhost:5173/test-ai-web/，带热更新。`/test-ai-web/` 前缀来自[部署](#部署)里的 `base` 配置。
+开发服务器运行在 http://localhost:5173/，带热更新。构建产物使用相对资源路径（见[部署](#部署)），本地开发和部署位置都不固定仓库名前缀。
 
 ## 脚本
 
@@ -61,7 +61,9 @@ import { parseSii } from 'sii-parser'
 
 部署由 `.github/workflows/deploy.yml` 处理：推送到 `main` 时自动运行，也可以在 Actions 页面手动触发（`workflow_dispatch`）。流程是 `npm ci`、`npm test`、`npm run build`（构建前会自动执行 `npm run format`），然后用 GitHub Pages 官方 actions 发布 `dist/`。
 
-这是项目站点，路径带仓库名前缀，所以 `vite.config.js` 设置 `base: '/test-ai-web/'`，构建产物里的资源 URL 才能落在 `https://kreedb.github.io/test-ai-web/` 下。如果以后换成自定义域名或用户站点仓库，把 `base` 改回 `/`。
+这是项目站点，但构建不绑定仓库名：`vite.config.js` 使用相对基址 `base: './'`，`dist/` 里的资源 URL 形如 `./assets/...`，同一份产物放在 `https://kreedb.github.io/test-ai-web/` 这样的项目子路径、域名根目录或任意目录都能运行，换部署位置不用改配置。前提是页面通过带尾斜杠的 URL 访问（如 `/test-ai-web/`），Service Worker 的离线导航回退也依赖这一点，并且导航继续使用 hash 路由；若改成非 hash 的多级路径，相对基址会按当前目录解析。
+
+`build/offline.js` 读取的是 Vite 解析后的 `config.base`，所以命令行 `npx vite build --base=...` 覆盖基址时，`dist/sw.js` 的预缓存路径会跟着变。`test/offline.test.mjs` 同时校验相对基址的产物和插件对解析后基址的跟随。
 
 导航使用 hash 路由（`#/parser`），不需要服务端重写规则。本地预览生产构建：
 
@@ -70,7 +72,7 @@ npm run build
 npm run preview
 ```
 
-然后打开 http://localhost:4173/test-ai-web/。
+然后打开 http://localhost:4173/。
 
 构建会额外生成 `dist/sw.js`：它由 `build/offline.js` 在构建时写入，把本次构建的全部资源与解析器示例预缓存，页面在线加载过一次后即可断网重开。开发服务器不注册 Service Worker（注册代码只在生产构建里执行），离线行为要用 `npm run build` + `npm run preview` 验证。
 
@@ -153,7 +155,7 @@ npm run build
 
 格式不再由独立的 CI 检查：`npm run build` 会先自动执行 `npm run format`，需要单独校验时仍可运行 `npm run format:check`。
 
-改动页面或模板后，再启动 `npm run dev` 并在浏览器里打开 `http://localhost:5173/test-ai-web/` 做一次冒烟检查。
+改动页面或模板后，再启动 `npm run dev` 并在浏览器里打开 `http://localhost:5173/` 做一次冒烟检查。
 
 ### 样式与依赖
 
