@@ -1,6 +1,6 @@
 <script setup>
 import { DATA_TYPE_NAMES, PDO_FLAG_BITS, PDO_SYNC_NAMES, setBits } from 'sii-parser'
-import { hex, parseDecValue, parseHexValue } from '@/lib/format'
+import { hex, normalizedDec, normalizedHex } from '@/lib/format'
 
 defineProps({
   pdos: { type: Array, required: true },
@@ -16,20 +16,6 @@ const SYNC_CHOICES = PDO_SYNC_NAMES.map((name, value) => ({ value, name }))
 
 function totalBits(pdo) {
   return pdo.entries.reduce((sum, entry) => sum + (Number(entry.bitLength) || 0), 0)
-}
-
-// Write the parsed value back so an invalid entry does not keep its raw text
-// when the model value happens to stay the same.
-function normalizedHex(event, bits = 16) {
-  const value = parseHexValue(event.target.value) & ((1 << bits) - 1)
-  event.target.value = hex(value, bits / 4)
-  return value
-}
-
-function normalizedDec(event, max = 0xffff) {
-  const value = Math.min(Math.max(parseDecValue(event.target.value), 0), max)
-  event.target.value = String(value)
-  return value
 }
 </script>
 

@@ -52,6 +52,21 @@ test('a 256-byte name is rejected instead of being sliced', () => {
   assert.throws(() => generateSiiFromEsi(xml), /255 字节/)
 })
 
+test('a PDO bit length above 255 is rejected instead of being truncated', () => {
+  const xml = sampleText('limx-tron2.xml').replace('<BitLen>16</BitLen>', '<BitLen>512</BitLen>')
+  assert.throws(() => generateSiiFromEsi(xml), /位长 512 超过 255 位上限/)
+})
+
+test('the EEPROM size warning compares the field with the input length', () => {
+  const bytes = sample('limx-tron2.bin')
+  const model = createEditorModel(parseSii(bytes))
+  model.info.eepromSizeBytes = 1024
+  model.info.eepromSizeRaw = 7
+
+  const generated = generateEsiXml(editorResult(model, bytes), editorOptions(model, 'Limx'))
+  assert.ok(generated.warnings.some((warning) => /EEPROM 大小字段 1024 字节与输入长度 2048 字节不一致/.test(warning.message)))
+})
+
 test('the Sync1 cycle factor survives export and import', () => {
   const bytes = sample('limx-tron2.bin')
   for (const factor of [0, 1, 4]) {

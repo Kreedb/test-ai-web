@@ -23,7 +23,7 @@ import SyncManagerTable from '@/components/SyncManagerTable.vue'
 import { downloadBlob, fileBaseName } from '@/lib/download'
 import * as editor from '@/lib/editor'
 import { generateEsiXml, verifyEsiXml } from '@/lib/esi'
-import { formatBytes, hex, parseDecValue, parseHexValue } from '@/lib/format'
+import { formatBytes, hex, normalizedDec, normalizedHex, parseDecValue } from '@/lib/format'
 import { COE_DETAIL_BITS, DATA_TYPE_NAMES, FMMU_USAGE, GENERAL_FLAG_BITS, MAILBOX_PROTOCOLS, MAX_INPUT_BYTES, PORT_TYPES, parseSii, setBits } from 'sii-parser'
 
 const SAMPLES = [
@@ -151,16 +151,11 @@ function messageOf(cause) {
 }
 
 function setHex(target, key, event, bits = 16) {
-  const value = parseHexValue(event.target.value)
-  target[key] = bits >= 32 ? value >>> 0 : value & ((1 << bits) - 1)
-  // A model value that does not change would leave the typed text in place, so
-  // write the parsed value back explicitly.
-  event.target.value = hex(target[key], bits / 4)
+  target[key] = normalizedHex(event, bits)
 }
 
 function setDec(target, key, event, max = 0xffff) {
-  target[key] = Math.min(Math.max(parseDecValue(event.target.value), 0), max)
-  event.target.value = String(target[key])
+  target[key] = normalizedDec(event, max)
 }
 
 function setSigned(target, key, event) {
@@ -186,7 +181,7 @@ function toggleGeneralFlag(bit, event) {
 
 function setEepromSize(event) {
   const value = parseDecValue(event.target.value, 2048)
-  const bytes = Math.max(128, Math.round(value / 128) * 128)
+  const bytes = Math.min(MAX_INPUT_BYTES, Math.max(128, Math.round(value / 128) * 128))
   model.info.eepromSizeBytes = bytes
   model.info.eepromSizeRaw = bytes / 128 - 1
   event.target.value = String(bytes)

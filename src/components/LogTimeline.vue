@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 
+import { formatTime } from '@/lib/format'
 import { logWindow } from '@/lib/replay/logfile'
 
 const props = defineProps({
@@ -13,14 +14,6 @@ const props = defineProps({
 const view = ref(null)
 const range = computed(() => logWindow(props.rows.length, props.active))
 const visibleRows = computed(() => props.rows.slice(range.value.start, range.value.end))
-
-function formatTime(seconds) {
-  const sign = seconds < 0 ? '-' : ''
-  const value = Math.abs(seconds)
-  const minutes = Math.floor(value / 60)
-  const rest = value - minutes * 60
-  return `${sign}${minutes}:${rest.toFixed(2).padStart(5, '0')}`
-}
 
 function relative(row) {
   return props.aligned ? formatTime(row.time - props.startTime) : row.time.toFixed(3)

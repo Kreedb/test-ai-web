@@ -128,8 +128,8 @@ test('the entry cap bounds how many documents one archive can add', async () => 
     maxEntries: MAX_ARCHIVE_ENTRIES,
   })
   assert.equal(files.length, MAX_ARCHIVE_ENTRIES)
-  assert.equal(skipped.length, 3)
-  assert.ok(skipped.every((entry) => entry.reason === 'too-many'))
+  // Excess entries collapse into one summary record instead of one path each.
+  assert.deepEqual(skipped, [{ name: '其余 3 个文件', reason: 'too-many' }])
 })
 
 test('members spelled with backslashes are still extracted', async () => {

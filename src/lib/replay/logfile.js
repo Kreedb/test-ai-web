@@ -50,16 +50,31 @@ function levelOf(line) {
  * are continuation lines of the previous entry, because robot logs wrap stack
  * traces and multi-line messages.
  */
-export function parseLogText(text) {
+function* linesOf(text) {
+  let start = text.charCodeAt(0) === 0xfeff ? 1 : 0
+  for (;;) {
+    let end = text.indexOf('\n', start)
+    if (end < 0) {
+      yield text.slice(start)
+      return
+    }
+    const line = text.slice(start, end)
+    yield line.endsWith('\r') ? line.slice(0, -1) : line
+    start = end + 1
+  }
+}
+
+export function parseLogText(text, state = null) {
   if (typeof text !== 'string') throw new Error('日志必须是文本')
 
-  const entries = []
-  const warnings = []
-  let current = null
+  const entries = state?.entries || []
+  const existing = entries.length
+  const warnings = state?.warnings || []
+  let current = state?.current || null
   let orphan = 0
-  let truncated = false
+  let truncated = Boolean(state?.truncated)
 
-  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+  for (const line of linesOf(text)) {
     const clock = clocksOf(line)
     // `clk(...)` can also appear inside a wrapped message, so a clk-only line
     // is a new entry only when it is a header (level marker or unindented).
@@ -77,7 +92,9 @@ export function parseLogText(text) {
     entries.push(current)
   }
 
-  for (const entry of entries) entry.text = entry.text.replace(/\s+$/, '')
+  // Only this chunk's tail can have changed; trimming the whole array on every
+  // file would make a multi-file load quadratic.
+  for (let index = Math.max(0, existing - 1); index < entries.length; index += 1) entries[index].text = entries[index].text.replace(/\s+$/, '')
   if (orphan) warnings.push({ level: 'warn', message: `日志开头有 ${orphan} 行没有时间戳，已忽略。` })
   if (truncated) {
     warnings.push({
@@ -85,7 +102,7 @@ export function parseLogText(text) {
       message: `日志超过 ${MAX_ENTRIES.toLocaleString()} 条，只解析了前 ${MAX_ENTRIES.toLocaleString()} 条。`,
     })
   }
-  return { entries, warnings }
+  return { entries, warnings, current, truncated }
 }
 
 function rangeOf(entries, key) {

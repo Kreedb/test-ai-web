@@ -180,32 +180,53 @@ export function finalizeSeries(accumulators) {
   return { series, warnings }
 }
 
+function appendColumn(target, source) {
+  const out = new target.constructor(target.length + source.length)
+  out.set(target, 0)
+  out.set(source, target.length)
+  return out
+}
+
+function sorted(times) {
+  for (let index = 1; index < times.length; index += 1) if (times[index] < times[index - 1]) return false
+  return true
+}
+
 /** Concatenate split-bag files, then order by time (usually nothing moves). */
 export function mergeSeries(sources) {
   const merged = {}
   for (const source of sources) {
     for (const series of Object.values(source || {})) {
       if (!series) continue
-      if (!merged[series.topic]) {
-        merged[series.topic] = {
-          ...series,
-          columns: series.columns ? series.columns.map((column) => [...column]) : undefined,
-          quat: series.quat ? series.quat.map((column) => [...column]) : undefined,
-          acc: series.acc ? series.acc.map((column) => [...column]) : undefined,
-          gyro: series.gyro ? series.gyro.map((column) => [...column]) : undefined,
-          times: [...series.times],
-        }
+      const target = merged[series.topic]
+      if (!target) {
+        merged[series.topic] = { ...series }
         continue
       }
-      const target = merged[series.topic]
-      for (const value of series.times) target.times.push(value)
+      if (target.kind !== series.kind || target.type !== series.type) {
+        throw new Error(`话题 ${target.topic} 在分片里的类型不一致（${target.type || '未知'} / ${series.type || '未知'}），无法合并`)
+      }
+      // Joint angle columns are ordered by name within each file, so a split
+      // whose publisher lists the joints differently must be remapped before
+      // appending or the angles move to the wrong joint.
+      let order = null
+      if (series.columns) {
+        if (series.names.length !== target.names.length) {
+          throw new Error(`话题 ${target.topic} 的关节数在分片里不一致（${target.names.length} / ${series.names.length}），无法合并`)
+        }
+        if (!sameNames(target.names, series.names)) {
+          const lookup = indexByName(series.names)
+          order = target.names.map((name) => {
+            const index = lookup.get(name)
+            if (index === undefined) throw new Error(`话题 ${target.topic} 的关节 ${name} 在后续分片里缺失`)
+            return index
+          })
+        }
+      }
+      target.times = appendColumn(target.times, series.times)
       for (const name of ['columns', 'quat', 'acc', 'gyro']) {
         if (!target[name] || !series[name]) continue
-        for (let index = 0; index < target[name].length; index += 1) {
-          const source = series[name][index]
-          const destination = target[name][index]
-          for (const value of source) destination.push(value)
-        }
+        target[name] = target[name].map((column, index) => appendColumn(column, series[name][order ? order[index] : index]))
       }
       target.count += series.count
       target.hasAcc ||= series.hasAcc
@@ -214,25 +235,43 @@ export function mergeSeries(sources) {
   }
 
   for (const series of Object.values(merged)) {
-    const order = series.times.map((_, index) => index)
-    let sorted = true
-    for (let index = 1; index < order.length; index += 1) {
-      if (series.times[order[index]] < series.times[order[index - 1]]) sorted = false
+    const length = series.times.length
+    const ordered = sorted(series.times)
+    let duplicate = false
+    if (ordered) {
+      for (let index = 1; index < length; index += 1) {
+        if (series.times[index] === series.times[index - 1]) {
+          duplicate = true
+          break
+        }
+      }
+      if (!duplicate) continue
     }
-    if (!sorted) order.sort((left, right) => series.times[left] - series.times[right])
+    const order = ordered ? null : new Uint32Array(length)
+    if (order) {
+      for (let index = 0; index < length; index += 1) order[index] = index
+      order.sort((left, right) => series.times[left] - series.times[right])
+    }
     // Duplicate timestamps at a file boundary keep the later record, matching
     // the single-file readers.
-    const keep = []
-    for (let index = 0; index < order.length; index += 1) {
-      const next = order[index + 1]
-      if (next !== undefined && series.times[next] === series.times[order[index]]) continue
-      keep.push(order[index])
+    const keep = new Uint32Array(length)
+    let count = 0
+    for (let position = 0; position < length; position += 1) {
+      const index = order ? order[position] : position
+      const next = order ? order[position + 1] : position + 1
+      if (next !== undefined && next < length && series.times[next] === series.times[index]) continue
+      keep[count++] = index
     }
-    series.times = keep.map((index) => series.times[index])
+    const copy = (source) => {
+      const out = new source.constructor(count)
+      for (let index = 0; index < count; index += 1) out[index] = source[keep[index]]
+      return out
+    }
+    series.times = copy(series.times)
     for (const name of ['columns', 'quat', 'acc', 'gyro']) {
-      if (series[name]) series[name] = series[name].map((column) => keep.map((index) => column[index]))
+      if (series[name]) series[name] = series[name].map(copy)
     }
-    series.count = keep.length
+    series.count = count
   }
   return merged
 }

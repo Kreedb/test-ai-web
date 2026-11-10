@@ -37,6 +37,36 @@ export function parseDecValue(text, fallback = 0) {
   return Number.isFinite(value) ? value : fallback
 }
 
+// Clamp an input event's value and write the normalized text back, so an
+// invalid entry does not keep its raw text when the model value stays equal.
+export function normalizedHex(event, bits = 16) {
+  const parsed = parseHexValue(event.target.value)
+  const value = bits >= 32 ? parsed >>> 0 : parsed & ((1 << bits) - 1)
+  event.target.value = hex(value, bits / 4)
+  return value
+}
+
+export function normalizedDec(event, max = 0xffff) {
+  const value = Math.min(Math.max(parseDecValue(event.target.value), 0), max)
+  event.target.value = String(value)
+  return value
+}
+
+export function formatTime(seconds) {
+  const sign = seconds < 0 ? '-' : ''
+  const value = Math.abs(seconds)
+  const minutes = Math.floor(value / 60)
+  const rest = value - minutes * 60
+  return `${sign}${minutes}:${rest.toFixed(2).padStart(5, '0')}`
+}
+
+export function jointColor(name) {
+  const text = String(name)
+  if (text.startsWith('left') || text.endsWith('_L')) return '#5b8cff'
+  if (text.startsWith('right') || text.endsWith('_R')) return '#f5b942'
+  return '#c4b5fd'
+}
+
 // SII strings are single-byte Latin-1; anything above 0xFF becomes `?`.
 export function latin1Bytes(text) {
   const bytes = []

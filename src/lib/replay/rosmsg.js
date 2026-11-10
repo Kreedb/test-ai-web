@@ -314,7 +314,7 @@ class Reader {
   }
 
   time() {
-    return { sec: this.u32(), nanosec: this.ros2 ? this.u32() : this.u32() }
+    return { sec: this.u32(), nanosec: this.u32() }
   }
 }
 

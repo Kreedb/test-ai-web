@@ -192,10 +192,6 @@ export function inspectRosbag(bytes) {
   return result
 }
 
-export function topicKind(type = '', definition = '') {
-  return messageKind(type, definition)
-}
-
 function decodeJoint(accumulator, data, timestamp) {
   const { names, values } = decodeJointMessage(data, {
     ros2: false,
@@ -224,7 +220,7 @@ export function readRosbag(bytes, { topics = [], onProgress } = {}) {
 
   for (const [id, connection] of connections) {
     if (!wanted.has(connection.topic)) continue
-    const kind = topicKind(connection.type, connection.definition)
+    const kind = messageKind(connection.type, connection.definition)
     if (!kind) {
       warnings.push({
         level: 'warn',
